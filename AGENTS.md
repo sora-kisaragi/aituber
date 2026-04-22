@@ -91,9 +91,11 @@ app/
 
 ## テスト方針
 
+- CI（GitHub Actions）は使用しない。テストはローカルで実行する
 - 外部依存（DB・外部 API）は `pytest-mock` でモック化
 - 正常系・異常系の両方を必ずカバーする
 - テスト名: `test_<対象>_<条件>_<期待結果>`
+- PR 前に必ず `pre-commit run --all-files` と `pytest` をローカルで実行する
 - 詳細: `docs/03_standards/test_review_standard.md`
 
 ---
