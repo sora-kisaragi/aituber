@@ -3,10 +3,14 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from app.db.session import Base
 import app.models.models  # noqa: F401 — モデルを登録する
+from app.config.config import settings
+from app.db.session import Base
 
 config = context.config
+
+# 環境変数 DATABASE_URL を alembic.ini より優先する
+config.set_main_option("sqlalchemy.url", settings.database_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
