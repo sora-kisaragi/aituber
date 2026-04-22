@@ -1,0 +1,4 @@
+interface:
+  display_name: "New Feature Branch"
+  short_description: "main から feature ブランチを切って開発を開始する"
+  default_prompt: "main を最新に更新し、指定された名前で feature ブランチを作成して開発を開始する。ブランチ名が未指定の場合はユーザーに確認する。"

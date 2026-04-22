@@ -1,0 +1,4 @@
+interface:
+  display_name: "Code Review"
+  short_description: "テスト・レビュー規約に基づくコードレビュー"
+  default_prompt: "指定されたファイルまたは機能について、docs/03_standards/test_review_standard.md のレビュー観点に従って API 設計・ドメインロジック・DB 操作・外部 API 連携・テストの観点でレビューし、問題点を番号付きで列挙する。"

@@ -150,3 +150,9 @@ Claude Code でよく使う操作はスキルとして定義されています�
 |---|---|
 | [start](.claude/skills/start/SKILL.md) | 作業開始時に Issue 確認・ブランチ作成まで一括実行 |
 | [create-issue](.claude/skills/create-issue/SKILL.md) | Issue 登録テンプレートと手順 |
+
+### スキル改善
+
+| スキル | 用途 |
+|---|---|
+| [update-skill](.claude/skills/update-skill/SKILL.md) | 使用したスキルを振り返り SKILL.md を改善する |

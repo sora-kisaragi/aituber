@@ -1,0 +1,4 @@
+interface:
+  display_name: "Update Skill"
+  short_description: "使用したスキルを振り返り SKILL.md を改善する"
+  default_prompt: "指定されたスキルの SKILL.md を読み、直前の実行結果を振り返って改善点を特定する。手順の曖昧さ・過不足・古いコマンド・ベストプラクティスの観点で評価し、変更案をユーザーに提示する。承認後に .claude/skills/ と .codex/skills/ の両方を更新してコミットする。"
