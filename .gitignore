@@ -53,3 +53,4 @@ htmlcov/
 
 # Docker
 docker/postgres-data/
+.claude/settings.local.json
