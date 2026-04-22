@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-from app.core.segmentation import SegmentResult, SegmentationService
+from app.core.segmentation import SegmentationService, SegmentResult
 
 
 class TestSegmentationService:

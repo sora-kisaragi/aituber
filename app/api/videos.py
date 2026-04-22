@@ -8,6 +8,8 @@ import cv2
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
+from app.clients.llm_client import LLMClient
+from app.clients.qwen_tts_client import QwenTTSClient
 from app.config.config import settings
 from app.core.composer import AudioEntry, Composer
 from app.core.event_generation import EventService
@@ -16,10 +18,17 @@ from app.core.prompt import CommentaryService
 from app.core.segmentation import FrameExtractor, SegmentationService
 from app.core.subtitle import SubtitleService
 from app.core.vision import VisionService
-from app.clients.llm_client import LLMClient
-from app.clients.qwen_tts_client import QwenTTSClient
 from app.db.session import get_db
-from app.models.models import Audio, Commentary, Event, Frame, Segment, Subtitle, UtterancePlan, Video
+from app.models.models import (
+    Audio,
+    Commentary,
+    Event,
+    Frame,
+    Segment,
+    Subtitle,
+    UtterancePlan,
+    Video,
+)
 from app.models.schemas import VideoRead
 from app.utils.logging import logger
 

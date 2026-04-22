@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from app.core.event_generation import EventResult
 from app.core.planning import UtterancePlanResult
@@ -54,7 +54,7 @@ class CommentaryService:
         self,
         plan: UtterancePlanResult,
         events: list[EventResult],
-        llm_client: "LLMClient",
+        llm_client: LLMClient,
         prev_text: str = "",
     ) -> dict[str, Any]:
         """実況文を生成して返す。"""

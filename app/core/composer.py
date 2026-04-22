@@ -46,7 +46,7 @@ class Composer:
     def _mix_audio(self, video_path: str, entries: list[AudioEntry], out_wav: str) -> None:
         """元動画音声と実況音声を amix でミックスして WAV に出力する。"""
         inputs = ["-i", video_path]
-        filter_parts = [f"[0:a]volume=0.6[orig]"]
+        filter_parts = ["[0:a]volume=0.6[orig]"]
 
         for i, entry in enumerate(entries, start=1):
             inputs += ["-i", entry.audio_path]

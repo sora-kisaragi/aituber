@@ -1,5 +1,6 @@
 from fastapi import FastAPI
-from app.api import videos, events, plans, commentaries, tts, subtitles
+
+from app.api import commentaries, events, plans, subtitles, tts, videos
 
 app = FastAPI(title="AITuber", version="0.1.0")
 
