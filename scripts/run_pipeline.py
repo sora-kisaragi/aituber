@@ -1,0 +1,289 @@
+"""
+エンドツーエンドパイプラインスクリプト。
+
+使い方:
+    python scripts/run_pipeline.py --input sample.mp4 [--title "タイトル"]
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+import uuid
+from pathlib import Path
+
+# プロジェクトルートを sys.path に追加
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+import cv2
+from sqlalchemy.orm import Session
+
+from app.clients.llm_client import LLMClient
+from app.clients.qwen_tts_client import QwenTTSClient
+from app.config.config import settings
+from app.core.composer import AudioEntry, Composer
+from app.core.event_generation import EventService
+from app.core.planning import UtterancePlanner
+from app.core.prompt import CommentaryService
+from app.core.segmentation import FrameExtractor, SegmentationService
+from app.core.subtitle import SubtitleService
+from app.core.vision import VisionService
+from app.db.session import SessionLocal
+from app.models.models import (
+    Audio,
+    Commentary,
+    Event,
+    Frame,
+    Segment,
+    Subtitle,
+    UtterancePlan,
+    Video,
+)
+from app.utils.logging import logger
+
+
+def probe_video_meta(video_path: str) -> tuple[float, float]:
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    cap.release()
+    return frames / fps, fps
+
+
+def run(input_path: str, title: str) -> str:
+    db: Session = SessionLocal()
+    try:
+        return _run_pipeline(db, input_path, title)
+    finally:
+        db.close()
+
+
+def _run_pipeline(db: Session, input_path: str, title: str) -> str:
+    logger.info("=== パイプライン開始: %s ===", input_path)
+
+    # ── 動画登録 ──────────────────────────────────────────────────────────────
+    video_id = uuid.uuid4()
+    media_dir = Path(settings.media_root) / str(video_id)
+    media_dir.mkdir(parents=True, exist_ok=True)
+
+    dest_path = media_dir / Path(input_path).name
+    import shutil
+    shutil.copy2(input_path, dest_path)
+
+    duration, fps = probe_video_meta(str(dest_path))
+    video = Video(
+        id=video_id,
+        title=title or Path(input_path).stem,
+        duration_seconds=duration,
+        fps=fps,
+        storage_path=str(dest_path),
+    )
+    db.add(video)
+    db.commit()
+    logger.info("動画登録完了: video_id=%s duration=%.1fs", video_id, duration)
+
+    # ── 動画分割 ──────────────────────────────────────────────────────────────
+    seg_service = SegmentationService(
+        segment_duration=settings.segment_duration,
+        media_root=settings.media_root,
+    )
+    seg_results = seg_service.execute(str(dest_path), str(video_id))
+    logger.info("分割完了: %d セグメント", len(seg_results))
+
+    # ── フレーム抽出・VLM 解析・イベント生成 ──────────────────────────────────
+    frame_extractor = FrameExtractor(media_root=settings.media_root)
+    vision_service = VisionService()
+    event_service = EventService()
+
+    all_event_results = []
+
+    for seg_result in seg_results:
+        segment = Segment(
+            video_id=video.id,
+            start_time=seg_result.start_time,
+            end_time=seg_result.end_time,
+            segment_type=seg_result.segment_type,
+            storage_path=seg_result.storage_path,
+        )
+        db.add(segment)
+        db.flush()
+
+        frame_results = frame_extractor.extract(
+            str(dest_path),
+            str(segment.id),
+            seg_result.start_time,
+            seg_result.end_time,
+        )
+
+        analyses = []
+        for fr in frame_results:
+            analysis = vision_service.analyze_frame(fr.image_path)
+            frame = Frame(
+                segment_id=segment.id,
+                timestamp=fr.timestamp,
+                image_path=fr.image_path,
+                features=vision_service.to_dict(analysis),
+            )
+            db.add(frame)
+            analyses.append(analysis)
+
+        event_results = event_service.generate(str(segment.id), seg_result.start_time, analyses)
+        for er in event_results:
+            event = Event(
+                segment_id=segment.id,
+                timestamp=er.timestamp,
+                event_type=er.event_type,
+                importance=er.importance,
+                details=er.details,
+            )
+            db.add(event)
+        all_event_results.extend(event_results)
+
+    db.commit()
+    logger.info("イベント生成完了: %d 件", len(all_event_results))
+
+    # ── 発話計画 ──────────────────────────────────────────────────────────────
+    planner = UtterancePlanner()
+    plan_results = planner.plan(str(video.id), all_event_results)
+    logger.info("発話計画: %d 件", len(plan_results))
+
+    # ── LLM 実況生成 ──────────────────────────────────────────────────────────
+    llm_client = LLMClient(
+        base_url=settings.llm_api_base,
+        api_key=settings.llm_api_key,
+        model=settings.llm_model_name,
+    )
+    commentary_service = CommentaryService()
+    prev_text = ""
+
+    for pr in plan_results:
+        plan = UtterancePlan(
+            video_id=video.id,
+            event_ids=pr.event_ids,
+            start_time=pr.start_time,
+            end_time=pr.end_time,
+            priority=pr.priority,
+            style=pr.style,
+        )
+        db.add(plan)
+        db.flush()
+
+        relevant = [e for e in all_event_results if e.event_id in pr.event_ids]
+        com_data = commentary_service.generate(pr, relevant, llm_client, prev_text)
+        commentary = Commentary(
+            utterance_plan_id=plan.id,
+            language=com_data["language"],
+            style=com_data["style"],
+            text=com_data["text"],
+            llm_raw_response=com_data["llm_raw_response"],
+        )
+        db.add(commentary)
+        prev_text = com_data["text"]
+        logger.info("実況生成: [%s] %s", pr.style, com_data["text"][:40])
+
+    db.commit()
+
+    # ── TTS 音声生成 + 字幕生成 ──────────────────────────────────────────────
+    tts_client = QwenTTSClient(
+        base_url=settings.tts_base_url,
+        default_mode=settings.tts_default_mode,
+        default_speaker=settings.tts_default_speaker,
+        default_language=settings.tts_default_language,
+        default_instruct=settings.tts_default_instruct,
+    )
+    subtitle_service = SubtitleService()
+
+    plans_in_db = (
+        db.query(UtterancePlan)
+        .filter(UtterancePlan.video_id == str(video.id))
+        .order_by(UtterancePlan.start_time)
+        .all()
+    )
+
+    audio_entries: list[AudioEntry] = []
+    srt_paths: list[str] = []
+
+    for plan in plans_in_db:
+        commentary = (
+            db.query(Commentary)
+            .filter(Commentary.utterance_plan_id == plan.id)
+            .first()
+        )
+        if not commentary:
+            continue
+
+        audio_path = str(Path(settings.media_root) / str(commentary.id) / "audio.wav")
+        try:
+            duration_sec = tts_client.synthesize(commentary.text, audio_path)
+        except RuntimeError as exc:
+            logger.warning("TTS 失敗 (スキップ): %s", exc)
+            continue
+
+        audio = Audio(
+            commentary_id=commentary.id,
+            storage_path=audio_path,
+            duration_seconds=duration_sec,
+        )
+        db.add(audio)
+
+        srt_result = subtitle_service.generate(
+            commentary.text,
+            plan.start_time,
+            duration_sec,
+            str(commentary.id),
+            settings.media_root,
+        )
+        subtitle = Subtitle(
+            commentary_id=commentary.id,
+            file_path=srt_result.file_path,
+            start_time=srt_result.start_time,
+            end_time=srt_result.end_time,
+        )
+        db.add(subtitle)
+
+        audio_entries.append(AudioEntry(
+            audio_path=audio_path,
+            start_time=plan.start_time,
+            duration_seconds=duration_sec,
+        ))
+        srt_paths.append(srt_result.file_path)
+
+    db.commit()
+    logger.info("音声・字幕生成完了: %d 件", len(audio_entries))
+
+    # ── 動画合成 ──────────────────────────────────────────────────────────────
+    merged_srt = _merge_srt(srt_paths, str(video_id), settings.media_root)
+    output_path = str(media_dir / "output.mp4")
+    composer = Composer(media_root=settings.media_root)
+    composer.compose(str(dest_path), audio_entries, merged_srt, output_path)
+
+    logger.info("=== パイプライン完了: %s ===", output_path)
+    return output_path
+
+
+def _merge_srt(srt_paths: list[str], video_id: str, media_root: str) -> str | None:
+    valid = [p for p in srt_paths if Path(p).exists()]
+    if not valid:
+        return None
+    merged = Path(media_root) / video_id / "merged.srt"
+    with open(merged, "w", encoding="utf-8") as out:
+        for p in valid:
+            out.write(Path(p).read_text(encoding="utf-8"))
+    return str(merged)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="AITuber パイプライン実行")
+    parser.add_argument("--input", required=True, help="入力 mp4 ファイルパス")
+    parser.add_argument("--title", default="", help="動画タイトル（省略時はファイル名）")
+    args = parser.parse_args()
+
+    if not Path(args.input).exists():
+        logger.error("入力ファイルが見つかりません: %s", args.input)
+        sys.exit(1)
+
+    output = run(args.input, args.title)
+    print(f"出力: {output}")
+
+
+if __name__ == "__main__":
+    main()
