@@ -93,7 +93,10 @@ class Composer:
         has_separate_audio: bool, video_path: str
     ) -> None:
         srt_escaped = srt_path.replace("\\", "/").replace(":", "\\:")
-        subtitle_filter = f"subtitles={srt_escaped}"
+        subtitle_filter = (
+            f"subtitles={srt_escaped}"
+            ":force_style='Fontname=Noto Sans CJK JP,FontSize=24,PrimaryColour=&H00FFFFFF'"
+        )
 
         if has_separate_audio:
             # 入力0: 元動画（映像）、入力1: ミックス済み音声 WAV
