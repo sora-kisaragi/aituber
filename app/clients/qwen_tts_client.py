@@ -56,16 +56,19 @@ class QwenTTSClient:
         mode = mode or self.default_mode
         speaker = speaker or self.default_speaker
         language = language or self.default_language
+        instruct = instruct or self.default_instruct
 
         endpoint = self._ENDPOINT_MAP.get(mode, f"/tts/{mode}")
-        form_data = self._build_form(endpoint, text, speaker, language)
+        payload = self._build_payload(endpoint, text, speaker, language, instruct)
+        use_form = "voice-clone/profile" in endpoint
 
         response: httpx.Response | None = None
         for attempt in range(self._MAX_RETRIES):
             try:
                 response = httpx.post(
                     f"{self._base_url}{endpoint}",
-                    data=form_data,
+                    data=payload if use_form else None,
+                    json=None if use_form else payload,
                     timeout=60.0,
                 )
                 response.raise_for_status()
@@ -81,21 +84,45 @@ class QwenTTSClient:
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         Path(output_path).write_bytes(response.content)
 
+        self._append_silence(output_path)
         return self._wav_duration(output_path)
 
-    def _build_form(
+    def _build_payload(
         self,
         endpoint: str,
         text: str,
         speaker: str,
         language: str,
+        instruct: str = "",
     ) -> dict[str, str]:
-        """エンドポイントに応じた form-data を組み立てる。"""
+        """エンドポイントに応じたリクエストペイロードを組み立てる。
+
+        voice-clone/profile のみ Form、それ以外は JSON body。
+        """
         if "voice-clone/profile" in endpoint:
-            # profile_name は .pt 拡張子ごと渡す
+            # Form data: instruct 非対応
             return {"text": text, "profile_name": speaker, "language": language}
-        # custom-voice / voice-design
-        return {"text": text, "speaker": speaker, "language": language}
+        if "voice-design" in endpoint:
+            # JSON body: speaker 不要、instruct 必須
+            return {"text": text, "instruct": instruct, "language": language}
+        # custom-voice: JSON body、instruct は任意
+        payload: dict[str, str] = {"text": text, "speaker": speaker, "language": language}
+        if instruct:
+            payload["instruct"] = instruct
+        return payload
+
+    def _append_silence(self, wav_path: str, pad_seconds: float = 0.3) -> None:
+        """WAV 末尾に無音フレームを追加する。TTS モデルの末尾クリップを補正する。"""
+        with wave.open(wav_path, "rb") as wf:
+            params = wf.getparams()
+            audio_frames = wf.readframes(wf.getnframes())
+
+        silent_frame_count = int(params.framerate * pad_seconds)
+        silent_bytes = b"\x00" * silent_frame_count * params.nchannels * params.sampwidth
+
+        with wave.open(wav_path, "wb") as wf:
+            wf.setparams(params)
+            wf.writeframes(audio_frames + silent_bytes)
 
     def _wav_duration(self, wav_path: str) -> float:
         with wave.open(wav_path, "rb") as wf:

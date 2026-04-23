@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from app.clients.vlm_client import VLMClient
 
 
 @dataclass
@@ -14,10 +17,16 @@ class VisionAnalysis:
 
 
 class VisionService:
-    """フレーム画像を解析してシーン情報を返す。MVP ではダミーレスポンスを返す。"""
+    """フレーム画像を解析してシーン情報を返す。"""
 
-    def analyze_frame(self, image_path: str) -> VisionAnalysis:
-        """フレームのシーン情報を返す。後続イシューで実 VLM に差し替える。"""
+    def analyze_frame(
+        self,
+        image_path: str,
+        vlm_client: VLMClient | None = None,
+    ) -> VisionAnalysis:
+        """フレームのシーン情報を返す。vlm_client が渡された場合は VLM で解析する。"""
+        if vlm_client is not None:
+            return vlm_client.analyze(image_path)
         return VisionAnalysis(
             scene_summary="戦闘中",
             objects=["敵", "プレイヤー"],

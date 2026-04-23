@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.clients.llm_client import LLMClient
 from app.clients.qwen_tts_client import QwenTTSClient
+from app.clients.vlm_client import VLMClient
 from app.config.config import settings
 from app.core.composer import AudioEntry, Composer
 from app.core.event_generation import EventService
@@ -38,6 +39,16 @@ from app.models.schemas import VideoRead
 from app.utils.logging import logger
 
 router = APIRouter()
+
+# 実況スタイル → TTS instruct テキスト
+_STYLE_INSTRUCT: dict[str, str] = {
+    "excited": (
+        "Speak with high energy and excitement, "
+        "like a passionate game streamer at a climactic moment."
+    ),
+    "neutral": "Speak in a natural, conversational voice like a friendly game commentator.",
+    "calm": "Speak slowly and calmly in a relaxed, gentle voice with low energy.",
+}
 
 
 @router.post("/", response_model=VideoRead, status_code=201)
@@ -92,6 +103,11 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
     )
     frame_extractor = FrameExtractor(media_root=settings.media_root)
     vision_service = VisionService()
+    vlm_client = VLMClient(
+        base_url=settings.llm_api_base,
+        api_key=settings.llm_api_key,
+        model=settings.vlm_model_name,
+    )
     event_service = EventService()
     planner = UtterancePlanner()
     commentary_service = CommentaryService()
@@ -126,7 +142,7 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
 
         analyses = []
         for fr in frame_results:
-            analysis = vision_service.analyze_frame(fr.image_path)
+            analysis = vision_service.analyze_frame(fr.image_path, vlm_client)
             frame = Frame(
                 segment_id=segment.id,
                 timestamp=fr.timestamp,
@@ -217,7 +233,8 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
             continue
 
         audio_path = str(Path(settings.media_root) / str(commentary.id) / "audio.wav")
-        duration = tts_client.synthesize(commentary.text, audio_path)
+        instruct = _STYLE_INSTRUCT.get(commentary.style or "", "")
+        duration = tts_client.synthesize(commentary.text, audio_path, instruct=instruct)
 
         audio = Audio(
             commentary_id=commentary.id,
@@ -314,11 +331,11 @@ def export_video(video_id: str, db: Session = Depends(get_db)) -> StreamingRespo
             srt_arcname = ""
 
             if audio and audio.storage_path and Path(audio.storage_path).exists():
-                audio_arcname = f"audio/{Path(audio.storage_path).name}"
+                audio_arcname = f"audio/{commentary.id}.wav"
                 zf.write(audio.storage_path, audio_arcname)
 
             if subtitle and subtitle.file_path and Path(subtitle.file_path).exists():
-                srt_arcname = f"subtitles/{Path(subtitle.file_path).name}"
+                srt_arcname = f"subtitles/{commentary.id}.srt"
                 zf.write(subtitle.file_path, srt_arcname)
 
             csv_rows.append({

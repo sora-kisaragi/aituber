@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     llm_api_base: str = "https://api.openai.com/v1"
     llm_api_key: str = ""
     llm_model_name: str = "gpt-4-turbo"
+    vlm_model_name: str = "gemma3:27b"
 
     media_root: str = "/var/aituber/media"
     log_level: str = "INFO"
