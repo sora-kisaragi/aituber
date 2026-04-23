@@ -25,6 +25,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "vlm_model_name": "フレーム解析に使う VLM モデル名",
     "segment_duration": "動画分割のセグメント長（秒）",
     "event_grouping_window": "イベント集約ウィンドウ（秒）",
+    "game_audio_volume": "ゲーム音量比率（0.0〜1.0、実況音声に対する元動画音量）",
 }
 
 # Web UI から変更を許可するキー（database_url・media_root 等はサーバー管理）
@@ -40,6 +41,7 @@ _EDITABLE_KEYS: set[str] = {
     "vlm_model_name",
     "segment_duration",
     "event_grouping_window",
+    "game_audio_volume",
 }
 
 

@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.clients.llm_client import LLMClient
 from app.clients.qwen_tts_client import QwenTTSClient
 from app.clients.vlm_client import VLMClient
-from app.config.config import settings
+from app.config.config import get_runtime_settings, settings
 from app.core.composer import AudioEntry, Composer
 from app.core.event_generation import EventService
 from app.core.exo_generator import ExoConfig, ExoEntry, ExoGenerator
@@ -145,24 +145,26 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
     if not video:
         raise HTTPException(status_code=404, detail="動画が見つかりません")
 
+    cfg = get_runtime_settings(db)
+
     seg_service = SegmentationService(
-        segment_duration=settings.segment_duration,
-        media_root=settings.media_root,
+        segment_duration=cfg.segment_duration,
+        media_root=cfg.media_root,
     )
-    frame_extractor = FrameExtractor(media_root=settings.media_root)
+    frame_extractor = FrameExtractor(media_root=cfg.media_root)
     vision_service = VisionService()
     vlm_client = VLMClient(
-        base_url=settings.llm_api_base,
-        api_key=settings.llm_api_key,
-        model=settings.vlm_model_name,
+        base_url=cfg.llm_api_base,
+        api_key=cfg.llm_api_key,
+        model=cfg.vlm_model_name,
     )
     event_service = EventService()
     planner = UtterancePlanner()
     commentary_service = CommentaryService()
     llm_client = LLMClient(
-        base_url=settings.llm_api_base,
-        api_key=settings.llm_api_key,
-        model=settings.llm_model_name,
+        base_url=cfg.llm_api_base,
+        api_key=cfg.llm_api_key,
+        model=cfg.llm_model_name,
     )
 
     update_progress(video_id, "segmentation", 0, "動画を分割中...")
@@ -263,15 +265,17 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
     if not video:
         raise HTTPException(status_code=404, detail="動画が見つかりません")
 
+    cfg = get_runtime_settings(db)
+
     tts_client = QwenTTSClient(
-        base_url=settings.tts_base_url,
-        default_mode=settings.tts_default_mode,
-        default_speaker=settings.tts_default_speaker,
-        default_language=settings.tts_default_language,
-        default_instruct=settings.tts_default_instruct,
+        base_url=cfg.tts_base_url,
+        default_mode=cfg.tts_default_mode,
+        default_speaker=cfg.tts_default_speaker,
+        default_language=cfg.tts_default_language,
+        default_instruct=cfg.tts_default_instruct,
     )
     subtitle_service = SubtitleService()
-    composer = Composer(media_root=settings.media_root, game_audio_volume=settings.game_audio_volume)
+    composer = Composer(media_root=cfg.media_root, game_audio_volume=cfg.game_audio_volume)
 
     plans = (
         db.query(UtterancePlan)
@@ -292,7 +296,7 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
 
         pct = int((plan_idx + 1) / plan_count * 80)
         update_progress(video_id, "tts", pct, f"音声合成中: {plan_idx + 1}/{plan_count}")
-        audio_path = str(Path(settings.media_root) / str(commentary.id) / "audio.wav")
+        audio_path = str(Path(cfg.media_root) / str(commentary.id) / "audio.wav")
         instruct = _STYLE_INSTRUCT.get(commentary.style or "", "")
         duration = tts_client.synthesize(commentary.text, audio_path, instruct=instruct)
 
@@ -308,7 +312,7 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
             plan.start_time,
             duration,
             str(commentary.id),
-            settings.media_root,
+            cfg.media_root,
         )
         subtitle = Subtitle(
             commentary_id=commentary.id,
@@ -331,8 +335,8 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
 
     update_progress(video_id, "compose", 85, "字幕・動画を合成中...")
     # 全字幕を結合した SRT ファイルを生成
-    merged_srt = _merge_srt(srt_paths, video_id, settings.media_root)
-    output_path = str(Path(settings.media_root) / str(video_id) / "output.mp4")
+    merged_srt = _merge_srt(srt_paths, video_id, cfg.media_root)
+    output_path = str(Path(cfg.media_root) / str(video_id) / "output.mp4")
     composer.compose(video.storage_path, audio_entries, merged_srt, output_path)
 
     logger.info("合成完了: %s", output_path)
