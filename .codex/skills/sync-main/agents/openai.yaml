@@ -1,4 +1,4 @@
 interface:
   display_name: "Sync Main"
   short_description: "main を最新に同期して現在のブランチをリベース"
-  default_prompt: "main を最新に pull し、現在の作業ブランチを main にリベースする。コンフリクトがある場合は内容を確認してユーザーに報告する。"
+  default_prompt: "main を最新に pull し、現在の作業ブランチを main にリベースする。コンフリクトがある場合は内容を確認してユーザーに報告する。実行後は感想・使い勝手・改善提案を確認し、更新する場合は /update-skill sync-main を案内する。"

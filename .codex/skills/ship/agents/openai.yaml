@@ -1,4 +1,4 @@
 interface:
   display_name: "Ship (Commit → Push → PR)"
   short_description: "変更をコミット・push して PR を作成する一連操作"
-  default_prompt: "現在のブランチの変更を確認し、pre-commit を実行後、コミット・push・PR 作成まで一括で行う。コミットメッセージが未指定の場合は変更内容から適切なメッセージを提案する。"
+  default_prompt: "現在のブランチの変更を確認し、pre-commit を実行後、コミット・push・PR 作成まで一括で行う。コミットメッセージが未指定の場合は変更内容から適切なメッセージを提案する。実行後は感想・使い勝手・改善提案を確認し、更新する場合は /update-skill ship を案内する。"

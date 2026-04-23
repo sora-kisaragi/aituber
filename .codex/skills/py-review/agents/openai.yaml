@@ -1,4 +1,4 @@
 interface:
   display_name: "Python Code Review"
   short_description: "Python コーディング規約に基づくレビュー"
-  default_prompt: "指定されたファイルについて、docs/03_standards/python_coding_standard.md の規約に従って命名規則・型ヒント・責務分離・エラーハンドリングの観点でレビューし、問題点を [カテゴリ] 形式で列挙する。"
+  default_prompt: "指定されたファイルについて、docs/03_standards/python_coding_standard.md の規約に従って命名規則・型ヒント・責務分離・エラーハンドリングの観点でレビューし、問題点を [カテゴリ] 形式で列挙する。実行後は感想・使い勝手・改善提案を確認し、更新する場合は /update-skill py-review を案内する。"
