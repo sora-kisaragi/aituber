@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.clients.llm_client import LLMClient
 from app.clients.qwen_tts_client import QwenTTSClient
+from app.clients.vlm_client import VLMClient
 from app.config.config import settings
 from app.core.composer import AudioEntry, Composer
 from app.core.event_generation import EventService
@@ -102,6 +103,11 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
     )
     frame_extractor = FrameExtractor(media_root=settings.media_root)
     vision_service = VisionService()
+    vlm_client = VLMClient(
+        base_url=settings.llm_api_base,
+        api_key=settings.llm_api_key,
+        model=settings.vlm_model_name,
+    )
     event_service = EventService()
     planner = UtterancePlanner()
     commentary_service = CommentaryService()
@@ -136,7 +142,7 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
 
         analyses = []
         for fr in frame_results:
-            analysis = vision_service.analyze_frame(fr.image_path)
+            analysis = vision_service.analyze_frame(fr.image_path, vlm_client)
             frame = Frame(
                 segment_id=segment.id,
                 timestamp=fr.timestamp,
