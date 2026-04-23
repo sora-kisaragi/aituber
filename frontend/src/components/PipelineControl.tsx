@@ -6,6 +6,7 @@ interface Props {
   onProcessStart: () => void
   onComposeStart: () => void
   onComposeDone: () => void
+  onProcessDone?: () => void
   disabled?: boolean
 }
 
@@ -14,6 +15,7 @@ export default function PipelineControl({
   onProcessStart,
   onComposeStart,
   onComposeDone,
+  onProcessDone,
   disabled,
 }: Props) {
   const [loading, setLoading] = useState<string | null>(null)
@@ -47,7 +49,7 @@ export default function PipelineControl({
         <button
           className="px-4 py-2 bg-blue-500 text-white rounded-lg font-medium text-sm hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           disabled={isDisabled}
-          onClick={() => run('処理', () => processVideo(videoId), onProcessStart)}
+          onClick={() => run('処理', () => processVideo(videoId), onProcessStart, onProcessDone)}
         >
           {loading === '処理' ? '処理中...' : '解析・実況生成'}
         </button>

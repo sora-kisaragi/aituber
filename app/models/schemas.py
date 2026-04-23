@@ -98,6 +98,20 @@ class SubtitleRead(BaseModel):
     end_time: float
 
 
+class TimelineItem(BaseModel):
+    start_time: float
+    end_time: float
+    style: str
+    text: str
+    commentary_id: str
+    audio_rel: str | None
+
+
+class VideoTimeline(BaseModel):
+    input_rel: str | None
+    items: list[TimelineItem]
+
+
 class SystemSettingRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

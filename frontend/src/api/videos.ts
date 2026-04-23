@@ -47,3 +47,22 @@ export function exportVideoUrl(id: string): string {
   const base = import.meta.env.VITE_API_URL ?? '/api'
   return `${base}/videos/${id}/export`
 }
+
+export interface TimelineItem {
+  start_time: number
+  end_time: number
+  style: string
+  text: string
+  commentary_id: string
+  audio_rel: string | null
+}
+
+export interface VideoTimeline {
+  input_rel: string | null
+  items: TimelineItem[]
+}
+
+export async function getTimeline(id: string): Promise<VideoTimeline> {
+  const { data } = await api.get<VideoTimeline>(`/videos/${id}/timeline`)
+  return data
+}

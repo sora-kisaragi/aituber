@@ -36,7 +36,7 @@ from app.models.models import (
     UtterancePlan,
     Video,
 )
-from app.models.schemas import VideoRead
+from app.models.schemas import TimelineItem, VideoRead, VideoTimeline
 from app.utils.logging import logger
 
 router = APIRouter()
@@ -94,6 +94,50 @@ def get_video(video_id: str, db: Session = Depends(get_db)) -> Video:
     if not video:
         raise HTTPException(status_code=404, detail="動画が見つかりません")
     return video
+
+
+@router.get("/{video_id}/timeline", response_model=VideoTimeline)
+def get_timeline(video_id: str, db: Session = Depends(get_db)) -> VideoTimeline:
+    """動画の発話計画・実況テキスト・音声パスを一覧で返す。"""
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="動画が見つかりません")
+
+    storage = Path(video.storage_path)
+    media_root = Path(settings.media_root)
+    try:
+        input_rel = str(storage.relative_to(media_root)).replace("\\", "/")
+    except ValueError:
+        input_rel = None
+
+    plans = (
+        db.query(UtterancePlan)
+        .filter(UtterancePlan.video_id == video_id)
+        .order_by(UtterancePlan.start_time)
+        .all()
+    )
+
+    items: list[TimelineItem] = []
+    for plan in plans:
+        commentary = (
+            db.query(Commentary).filter(Commentary.utterance_plan_id == plan.id).first()
+        )
+        if not commentary:
+            continue
+        audio = db.query(Audio).filter(Audio.commentary_id == commentary.id).first()
+        audio_rel = f"{commentary.id}/audio.wav" if audio and audio.storage_path else None
+        items.append(
+            TimelineItem(
+                start_time=plan.start_time,
+                end_time=plan.end_time,
+                style=plan.style,
+                text=commentary.text,
+                commentary_id=str(commentary.id),
+                audio_rel=audio_rel,
+            )
+        )
+
+    return VideoTimeline(input_rel=input_rel, items=items)
 
 
 @router.post("/{video_id}/process")
