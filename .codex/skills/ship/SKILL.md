@@ -18,7 +18,8 @@ description: 現在のブランチの変更をコミット → push → PR 作�
 
 1. 変更ファイルと pre-commit を確認する
    ```bash
-   git status && git diff --stat
+   git status
+   git diff --stat
    pre-commit run --all-files
    ```
 
@@ -34,8 +35,8 @@ description: 現在のブランチの変更をコミット → push → PR 作�
    ```
 
 4. PR を作成する（関連 Issue があれば `Closes #XX` を含める）
-   ```bash
-   gh pr create --title "<type>: <概要>" --body "$(cat <<'EOF'
+   ```powershell
+   @'
    ## 概要
    <変更内容>
 
@@ -47,8 +48,7 @@ description: 現在のブランチの変更をコミット → push → PR 作�
    - [ ] 異常系確認
    - [ ] テスト追加（該当時）
    - [ ] pre-commit 通過
-   EOF
-   )"
+   '@ | gh pr create --title "<type>: <概要>" --body-file -
    ```
 
 ## コミットメッセージ規則
