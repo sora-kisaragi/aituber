@@ -8,6 +8,15 @@ from sqlalchemy.orm import relationship
 from app.db.session import Base
 
 
+class SystemSetting(Base):
+    __tablename__ = "system_settings"
+
+    key = Column(Text, primary_key=True)
+    value = Column(Text, nullable=False)
+    description = Column(Text)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class Video(Base):
     __tablename__ = "videos"
 

@@ -98,6 +98,19 @@ class SubtitleRead(BaseModel):
     end_time: float
 
 
+class SystemSettingRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    key: str
+    value: str
+    description: str | None
+
+
+class SystemSettingUpdate(BaseModel):
+    key: str
+    value: str
+
+
 class TTSSynthesizeRequest(BaseModel):
     text: str
     mode: str = "custom_voice"
