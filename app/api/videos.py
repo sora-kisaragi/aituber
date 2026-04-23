@@ -347,10 +347,11 @@ def export_video(video_id: str, db: Session = Depends(get_db)) -> StreamingRespo
     """生成済みの実況データを ZIP でエクスポートする。
 
     ZIP 構成:
-      commentary.csv       — 発話一覧（start_time, end_time, text, style, audio_file, srt_file）
-      audio/               — 各発話の WAV ファイル
+      input/{filename}     — 元動画ファイル
+      audio/               — 各発話の WAV ファイル（{commentary_id}.wav）
       subtitles/           — 各発話の SRT ファイル
-      segments/            — 元動画の分割セグメント MP4
+      commentary.csv       — 発話一覧（start_time, end_time, text, style, audio_file, srt_file）
+      timeline.exo         — AviUtl 拡張編集タイムライン（元動画参照）
     """
     video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
@@ -362,12 +363,15 @@ def export_video(video_id: str, db: Session = Depends(get_db)) -> StreamingRespo
         .order_by(UtterancePlan.start_time)
         .all()
     )
-    segments = (
-        db.query(Segment).filter(Segment.video_id == video_id).order_by(Segment.start_time).all()
-    )
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        # 元動画を input/ に追加
+        input_path = Path(video.storage_path)
+        input_arcname = f"input/{input_path.name}"
+        if input_path.exists():
+            zf.write(str(input_path), input_arcname)
+
         csv_rows: list[dict] = []
 
         for plan in plans:
@@ -402,10 +406,6 @@ def export_video(video_id: str, db: Session = Depends(get_db)) -> StreamingRespo
                 }
             )
 
-        for seg in segments:
-            if seg.storage_path and Path(seg.storage_path).exists():
-                zf.write(seg.storage_path, f"segments/{Path(seg.storage_path).name}")
-
         # commentary.csv を生成して ZIP に追加
         csv_buf = io.StringIO()
         writer = csv.DictWriter(
@@ -416,7 +416,7 @@ def export_video(video_id: str, db: Session = Depends(get_db)) -> StreamingRespo
         writer.writerows(csv_rows)
         zf.writestr("commentary.csv", csv_buf.getvalue())
 
-        # timeline.exo を生成して ZIP に追加
+        # timeline.exo を生成して ZIP に追加（元動画を参照）
         exo_entries = [
             ExoEntry(
                 audio_file=row["audio_file"].replace("/", "\\"),
@@ -427,16 +427,13 @@ def export_video(video_id: str, db: Session = Depends(get_db)) -> StreamingRespo
             for row in csv_rows
             if row["audio_file"]
         ]
-        seg_file = (
-            f"segments\\{Path(segments[0].storage_path).name}"
-            if segments and segments[0].storage_path
-            else ""
-        )
         exo_config = ExoConfig(
             fps=video.fps or 30.0,
             total_duration=video.duration_seconds or 0.0,
         )
-        exo_bytes = ExoGenerator().generate(seg_file, exo_entries, exo_config)
+        exo_bytes = ExoGenerator().generate(
+            input_arcname.replace("/", "\\"), exo_entries, exo_config
+        )
         zf.writestr("timeline.exo", exo_bytes)
 
     buf.seek(0)
