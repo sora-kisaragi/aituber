@@ -6,6 +6,21 @@ interface Props {
   onSaved: () => void
 }
 
+const SELECT_OPTIONS: Record<string, { label: string; value: string }[]> = {
+  tts_default_mode: [
+    { label: 'voice_clone_profile（保存済みプロファイル）', value: 'voice_clone_profile' },
+    { label: 'custom_voice（プリセット話者）', value: 'custom_voice' },
+    { label: 'voice_design（パラメータ指定）', value: 'voice_design' },
+  ],
+  tts_default_language: [
+    { label: 'auto（自動判定）', value: 'auto' },
+    { label: 'japanese（日本語）', value: 'japanese' },
+    { label: 'english（英語）', value: 'english' },
+  ],
+}
+
+const NUMBER_KEYS = new Set(['segment_duration', 'event_grouping_window', 'game_audio_volume'])
+
 export default function SettingsEditor({ settings, onSaved }: Props) {
   const [values, setValues] = useState<Record<string, string>>(
     Object.fromEntries(settings.map((s) => [s.key, s.value])),
@@ -13,6 +28,9 @@ export default function SettingsEditor({ settings, onSaved }: Props) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
+
+  const handleChange = (key: string, value: string) =>
+    setValues((prev) => ({ ...prev, [key]: value }))
 
   const handleSave = async () => {
     setSaving(true)
@@ -39,14 +57,29 @@ export default function SettingsEditor({ settings, onSaved }: Props) {
             {s.description && (
               <p className="text-xs text-gray-400 mb-1">{s.description}</p>
             )}
-            <input
-              type="text"
-              value={values[s.key] ?? ''}
-              onChange={(e) =>
-                setValues((prev) => ({ ...prev, [s.key]: e.target.value }))
-              }
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400"
-            />
+            {SELECT_OPTIONS[s.key] ? (
+              <select
+                value={values[s.key] ?? ''}
+                onChange={(e) => handleChange(s.key, e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400 bg-white"
+              >
+                {SELECT_OPTIONS[s.key].map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type={NUMBER_KEYS.has(s.key) ? 'number' : 'text'}
+                step={s.key === 'game_audio_volume' ? '0.05' : '1'}
+                min={s.key === 'game_audio_volume' ? '0' : undefined}
+                max={s.key === 'game_audio_volume' ? '1' : undefined}
+                value={values[s.key] ?? ''}
+                onChange={(e) => handleChange(s.key, e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400"
+              />
+            )}
           </div>
         ))}
       </div>
