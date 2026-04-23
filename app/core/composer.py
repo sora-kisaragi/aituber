@@ -17,8 +17,13 @@ class AudioEntry:
 class Composer:
     """FFmpeg で実況音声・字幕を元動画にミックスして最終 mp4 を出力する。"""
 
-    def __init__(self, media_root: str = "/var/aituber/media") -> None:
+    def __init__(
+        self,
+        media_root: str = "/var/aituber/media",
+        game_audio_volume: float = 0.3,
+    ) -> None:
         self.media_root = Path(media_root)
+        self.game_audio_volume = game_audio_volume
 
     def compose(
         self,
@@ -55,7 +60,7 @@ class Composer:
     def _mix_audio(self, video_path: str, entries: list[AudioEntry], out_wav: str) -> None:
         """元動画音声と実況音声を amix でミックスして WAV に出力する。"""
         inputs = ["-i", video_path]
-        filter_parts = ["[0:a]volume=0.6[orig]"]
+        filter_parts = [f"[0:a]volume={self.game_audio_volume}[orig]"]
 
         for i, entry in enumerate(entries, start=1):
             inputs += ["-i", entry.audio_path]

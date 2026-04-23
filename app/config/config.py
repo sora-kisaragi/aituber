@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     vlm_model_name: str = "gemma3:27b"
 
     media_root: str = "/var/aituber/media"
+    game_audio_volume: float = 0.3
     log_level: str = "INFO"
 
     segment_duration: int = 5
