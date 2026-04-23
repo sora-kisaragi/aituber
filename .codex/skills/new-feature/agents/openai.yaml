@@ -1,4 +1,4 @@
 interface:
   display_name: "New Feature Branch"
   short_description: "main からブランチを切って開発を開始する"
-  default_prompt: "main を最新に更新し、指定された prefix/branch 形式でブランチを作成して開発を開始する。prefix が未指定なら feature/ を提案する。"
+  default_prompt: "main を最新に更新し、指定された prefix/branch 形式でブランチを作成して開発を開始する。prefix が未指定なら feature/ を提案する。実行後は感想・使い勝手・改善提案を確認し、更新する場合は /update-skill new-feature を案内する。"

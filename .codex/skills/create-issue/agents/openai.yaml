@@ -1,4 +1,4 @@
 interface:
   display_name: "Create Issue"
   short_description: "GitHub Issue を正しい粒度・構造で登録"
-  default_prompt: "Issue の種別（Task / Bug / Epic）を確認し、適切なテンプレートに従って gh issue create コマンドを実行する。タイトル・本文・ラベルを正しく設定する。"
+  default_prompt: "Issue の種別（Task / Bug / Epic）を確認し、適切なテンプレートに従って gh issue create コマンドを実行する。タイトル・本文・ラベルを正しく設定する。実行後は感想・使い勝手・改善提案を確認し、更新する場合は /update-skill create-issue を案内する。"

@@ -1,4 +1,4 @@
 interface:
   display_name: "Start Work"
   short_description: "Issue を確認してブランチ作成まで一括実行"
-  default_prompt: "GitHub Issues から phase:mvp ラベルの open Issue を取得し、優先度を考慮して作業候補を提示する。ユーザーが Issue を選んだらブランチを作成し、Issue に作業開始コメントを残す。"
+  default_prompt: "GitHub Issues から phase:mvp ラベルの open Issue を取得し、優先度を考慮して作業候補を提示する。ユーザーが Issue を選んだらブランチを作成し、Issue に作業開始コメントを残す。実行後は感想・使い勝手・改善提案を確認し、更新する場合は /update-skill start を案内する。"
