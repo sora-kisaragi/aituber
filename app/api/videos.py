@@ -325,11 +325,11 @@ def export_video(video_id: str, db: Session = Depends(get_db)) -> StreamingRespo
             srt_arcname = ""
 
             if audio and audio.storage_path and Path(audio.storage_path).exists():
-                audio_arcname = f"audio/{Path(audio.storage_path).name}"
+                audio_arcname = f"audio/{commentary.id}.wav"
                 zf.write(audio.storage_path, audio_arcname)
 
             if subtitle and subtitle.file_path and Path(subtitle.file_path).exists():
-                srt_arcname = f"subtitles/{Path(subtitle.file_path).name}"
+                srt_arcname = f"subtitles/{commentary.id}.srt"
                 zf.write(subtitle.file_path, srt_arcname)
 
             csv_rows.append({
