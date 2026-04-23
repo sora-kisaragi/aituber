@@ -61,6 +61,18 @@ class SubtitleService:
         )
 
     @staticmethod
+    def to_webvtt(srt_content: str) -> str:
+        """SRT テキストを WebVTT 形式に変換する。"""
+        vtt = "WEBVTT\n\n" + srt_content.replace(",", ".", 1)
+        # 全タイムスタンプ行のカンマをピリオドに置換
+        lines = []
+        for line in vtt.splitlines():
+            if "-->" in line:
+                line = line.replace(",", ".")
+            lines.append(line)
+        return "\n".join(lines)
+
+    @staticmethod
     def _fmt_time(seconds: float) -> str:
         h = int(seconds // 3600)
         m = int((seconds % 3600) // 60)

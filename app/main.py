@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api import commentaries, events, plans, settings, subtitles, tts, videos
+from app.api import commentaries, events, plans, progress, settings, subtitles, tts, videos
 from app.config.config import settings as app_settings
 
 app = FastAPI(title="AITuber", version="0.1.0")
@@ -21,6 +21,7 @@ app.include_router(commentaries.router, prefix="/commentaries", tags=["commentar
 app.include_router(tts.router, prefix="/tts", tags=["tts"])
 app.include_router(subtitles.router, prefix="/subtitles", tags=["subtitles"])
 app.include_router(settings.router, prefix="/settings", tags=["settings"])
+app.include_router(progress.router, prefix="/videos", tags=["progress"])
 
 app.mount("/media", StaticFiles(directory=app_settings.media_root, check_dir=False), name="media")
 

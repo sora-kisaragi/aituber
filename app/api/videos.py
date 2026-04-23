@@ -20,6 +20,7 @@ from app.core.composer import AudioEntry, Composer
 from app.core.event_generation import EventService
 from app.core.exo_generator import ExoConfig, ExoEntry, ExoGenerator
 from app.core.planning import UtterancePlanner
+from app.core.progress_store import update_progress
 from app.core.prompt import CommentaryService
 from app.core.segmentation import FrameExtractor, SegmentationService
 from app.core.subtitle import SubtitleService
@@ -117,12 +118,15 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
         model=settings.llm_model_name,
     )
 
+    update_progress(video_id, "segmentation", 0, "動画を分割中...")
     seg_results = seg_service.execute(video.storage_path, str(video.id))
     logger.info("分割完了: %d セグメント", len(seg_results))
+    update_progress(video_id, "segmentation", 10, f"分割完了: {len(seg_results)} セグメント")
 
     all_events = []
+    seg_count = len(seg_results)
 
-    for seg_result in seg_results:
+    for seg_idx, seg_result in enumerate(seg_results):
         segment = Segment(
             video_id=video.id,
             start_time=seg_result.start_time,
@@ -152,6 +156,9 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
             db.add(frame)
             analyses.append(analysis)
 
+        pct = 10 + int((seg_idx + 1) / seg_count * 60)
+        update_progress(video_id, "vision", pct, f"フレーム解析中: {seg_idx + 1}/{seg_count}")
+
         event_results = event_service.generate(str(segment.id), seg_result.start_time, analyses)
         for er in event_results:
             event = Event(
@@ -165,10 +172,13 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
             all_events.append(er)
 
     db.commit()
+    update_progress(video_id, "planning", 75, "発話計画を生成中...")
 
     plan_results = planner.plan(str(video.id), all_events)
+    update_progress(video_id, "planning", 80, f"発話計画完了: {len(plan_results)} 件")
     prev_text = ""
-    for pr in plan_results:
+    plan_count = len(plan_results)
+    for plan_idx, pr in enumerate(plan_results):
         plan = UtterancePlan(
             video_id=video.id,
             event_ids=pr.event_ids,
@@ -190,9 +200,12 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
             llm_raw_response=com_data["llm_raw_response"],
         )
         db.add(commentary)
+        pct = 80 + int((plan_idx + 1) / plan_count * 15)
+        update_progress(video_id, "commentary", pct, f"実況生成中: {plan_idx + 1}/{plan_count}")
         prev_text = com_data["text"]
 
     db.commit()
+    update_progress(video_id, "done", 100, "処理完了")
     return {"status": "ok", "video_id": video_id, "plans": len(plan_results)}
 
 
@@ -222,8 +235,10 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
 
     audio_entries = []
     srt_paths = []
+    plan_count = len(plans)
+    update_progress(video_id, "compose", 0, "音声合成を開始...")
 
-    for plan in plans:
+    for plan_idx, plan in enumerate(plans):
         commentary = (
             db.query(Commentary)
             .filter(Commentary.utterance_plan_id == plan.id)
@@ -232,6 +247,8 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
         if not commentary:
             continue
 
+        pct = int((plan_idx + 1) / plan_count * 80)
+        update_progress(video_id, "tts", pct, f"音声合成中: {plan_idx + 1}/{plan_count}")
         audio_path = str(Path(settings.media_root) / str(commentary.id) / "audio.wav")
         instruct = _STYLE_INSTRUCT.get(commentary.style or "", "")
         duration = tts_client.synthesize(commentary.text, audio_path, instruct=instruct)
@@ -267,12 +284,14 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
 
     db.commit()
 
+    update_progress(video_id, "compose", 85, "字幕・動画を合成中...")
     # 全字幕を結合した SRT ファイルを生成
     merged_srt = _merge_srt(srt_paths, video_id, settings.media_root)
     output_path = str(Path(settings.media_root) / str(video_id) / "output.mp4")
     composer.compose(video.storage_path, audio_entries, merged_srt, output_path)
 
     logger.info("合成完了: %s", output_path)
+    update_progress(video_id, "done", 100, "合成完了")
     return {"status": "ok", "output_path": output_path}
 
 
