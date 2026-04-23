@@ -59,14 +59,16 @@ class QwenTTSClient:
         instruct = instruct or self.default_instruct
 
         endpoint = self._ENDPOINT_MAP.get(mode, f"/tts/{mode}")
-        form_data = self._build_form(endpoint, text, speaker, language, instruct)
+        payload = self._build_payload(endpoint, text, speaker, language, instruct)
+        use_form = "voice-clone/profile" in endpoint
 
         response: httpx.Response | None = None
         for attempt in range(self._MAX_RETRIES):
             try:
                 response = httpx.post(
                     f"{self._base_url}{endpoint}",
-                    data=form_data,
+                    data=payload if use_form else None,
+                    json=None if use_form else payload,
                     timeout=60.0,
                 )
                 response.raise_for_status()
@@ -84,7 +86,7 @@ class QwenTTSClient:
 
         return self._wav_duration(output_path)
 
-    def _build_form(
+    def _build_payload(
         self,
         endpoint: str,
         text: str,
@@ -92,18 +94,21 @@ class QwenTTSClient:
         language: str,
         instruct: str = "",
     ) -> dict[str, str]:
-        """エンドポイントに応じた form-data を組み立てる。"""
+        """エンドポイントに応じたリクエストペイロードを組み立てる。
+
+        voice-clone/profile のみ Form、それ以外は JSON body。
+        """
         if "voice-clone/profile" in endpoint:
-            # instruct 非対応: profile_name (.pt 拡張子ごと) のみ
+            # Form data: instruct 非対応
             return {"text": text, "profile_name": speaker, "language": language}
         if "voice-design" in endpoint:
-            # speaker 不要、instruct 必須
+            # JSON body: speaker 不要、instruct 必須
             return {"text": text, "instruct": instruct, "language": language}
-        # custom-voice: instruct は任意
-        form: dict[str, str] = {"text": text, "speaker": speaker, "language": language}
+        # custom-voice: JSON body、instruct は任意
+        payload: dict[str, str] = {"text": text, "speaker": speaker, "language": language}
         if instruct:
-            form["instruct"] = instruct
-        return form
+            payload["instruct"] = instruct
+        return payload
 
     def _wav_duration(self, wav_path: str) -> float:
         with wave.open(wav_path, "rb") as wf:
