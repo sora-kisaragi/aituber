@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import csv
+import io
 import shutil
 import uuid
+import zipfile
 from pathlib import Path
 
 import cv2
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.clients.llm_client import LLMClient
@@ -252,6 +256,101 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
 
     logger.info("合成完了: %s", output_path)
     return {"status": "ok", "output_path": output_path}
+
+
+@router.get("/{video_id}/export")
+def export_video(video_id: str, db: Session = Depends(get_db)) -> StreamingResponse:
+    """生成済みの実況データを ZIP でエクスポートする。
+
+    ZIP 構成:
+      commentary.csv       — 発話一覧（start_time, end_time, text, style, audio_file, srt_file）
+      audio/               — 各発話の WAV ファイル
+      subtitles/           — 各発話の SRT ファイル
+      segments/            — 元動画の分割セグメント MP4
+    """
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="動画が見つかりません")
+
+    plans = (
+        db.query(UtterancePlan)
+        .filter(UtterancePlan.video_id == video_id)
+        .order_by(UtterancePlan.start_time)
+        .all()
+    )
+    segments = (
+        db.query(Segment)
+        .filter(Segment.video_id == video_id)
+        .order_by(Segment.start_time)
+        .all()
+    )
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        csv_rows: list[dict] = []
+
+        for plan in plans:
+            commentary = (
+                db.query(Commentary)
+                .filter(Commentary.utterance_plan_id == plan.id)
+                .first()
+            )
+            if not commentary:
+                continue
+
+            audio = (
+                db.query(Audio)
+                .filter(Audio.commentary_id == commentary.id)
+                .first()
+            )
+            subtitle = (
+                db.query(Subtitle)
+                .filter(Subtitle.commentary_id == commentary.id)
+                .first()
+            )
+
+            audio_arcname = ""
+            srt_arcname = ""
+
+            if audio and audio.storage_path and Path(audio.storage_path).exists():
+                audio_arcname = f"audio/{Path(audio.storage_path).name}"
+                zf.write(audio.storage_path, audio_arcname)
+
+            if subtitle and subtitle.file_path and Path(subtitle.file_path).exists():
+                srt_arcname = f"subtitles/{Path(subtitle.file_path).name}"
+                zf.write(subtitle.file_path, srt_arcname)
+
+            csv_rows.append({
+                "start_time": plan.start_time,
+                "end_time": plan.end_time,
+                "text": commentary.text,
+                "style": commentary.style,
+                "audio_file": audio_arcname,
+                "srt_file": srt_arcname,
+            })
+
+        for seg in segments:
+            if seg.storage_path and Path(seg.storage_path).exists():
+                zf.write(seg.storage_path, f"segments/{Path(seg.storage_path).name}")
+
+        # commentary.csv を生成して ZIP に追加
+        csv_buf = io.StringIO()
+        writer = csv.DictWriter(
+            csv_buf,
+            fieldnames=["start_time", "end_time", "text", "style", "audio_file", "srt_file"],
+        )
+        writer.writeheader()
+        writer.writerows(csv_rows)
+        zf.writestr("commentary.csv", csv_buf.getvalue())
+
+    buf.seek(0)
+    filename = f"aituber_export_{video_id[:8]}.zip"
+    logger.info("エクスポート: %s (%d 発話)", filename, len(csv_rows))
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 def _probe_video_meta(video_path: str) -> tuple[float, float]:
