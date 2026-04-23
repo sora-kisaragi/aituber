@@ -271,7 +271,7 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
         default_instruct=settings.tts_default_instruct,
     )
     subtitle_service = SubtitleService()
-    composer = Composer(media_root=settings.media_root)
+    composer = Composer(media_root=settings.media_root, game_audio_volume=settings.game_audio_volume)
 
     plans = (
         db.query(UtterancePlan)
