@@ -49,5 +49,5 @@ def get_runtime_settings(db: Session) -> Settings:
         if k in base:
             field_type = type(base[k])
             with contextlib.suppress(ValueError, TypeError):
-                base[k] = field_type(v)
+                base[k] = field_type(v.strip() if isinstance(v, str) else v)
     return Settings.model_validate(base)

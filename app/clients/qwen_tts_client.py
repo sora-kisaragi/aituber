@@ -53,9 +53,9 @@ class QwenTTSClient:
 
         最大 3 回リトライする。リクエストは multipart/form-data で送信する。
         """
-        mode = mode or self.default_mode
-        speaker = speaker or self.default_speaker
-        language = language or self.default_language
+        mode = (mode or self.default_mode).strip()
+        speaker = (speaker or self.default_speaker).strip()
+        language = (language or self.default_language).strip()
         instruct = instruct or self.default_instruct
 
         endpoint = self._ENDPOINT_MAP.get(mode, f"/tts/{mode}")
@@ -110,6 +110,31 @@ class QwenTTSClient:
         if instruct:
             payload["instruct"] = instruct
         return payload
+
+    def list_speakers(self) -> list[str]:
+        """custom_voice で使える話者一覧を返す（GET /tts/speakers）。失敗時は空リスト。"""
+        return self._fetch_list("/tts/speakers", "speakers")
+
+    def list_profiles(self) -> list[str]:
+        """保存済みプロファイル一覧を返す（GET /tts/voice-clone/profiles）。失敗時は空リスト。"""
+        return self._fetch_list("/tts/voice-clone/profiles", "profiles")
+
+    def list_languages(self) -> list[str]:
+        """対応言語一覧を返す（GET /tts/languages）。失敗時は空リスト。"""
+        return self._fetch_list("/tts/languages", "languages")
+
+    def _fetch_list(self, path: str, key: str) -> list[str]:
+        try:
+            r = httpx.get(f"{self._base_url}{path}", timeout=5.0)
+            r.raise_for_status()
+            data = r.json()
+            if isinstance(data, list):
+                return [str(v) for v in data]
+            if isinstance(data, dict):
+                return [str(v) for v in data.get(key, [])]
+        except Exception:
+            pass
+        return []
 
     def _append_silence(self, wav_path: str, pad_seconds: float = 0.3) -> None:
         """WAV 末尾に無音フレームを追加する。TTS モデルの末尾クリップを補正する。"""
