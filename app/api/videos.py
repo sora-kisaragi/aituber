@@ -17,6 +17,7 @@ from app.clients.qwen_tts_client import QwenTTSClient
 from app.config.config import settings
 from app.core.composer import AudioEntry, Composer
 from app.core.event_generation import EventService
+from app.core.exo_generator import ExoConfig, ExoEntry, ExoGenerator
 from app.core.planning import UtterancePlanner
 from app.core.prompt import CommentaryService
 from app.core.segmentation import FrameExtractor, SegmentationService
@@ -342,6 +343,29 @@ def export_video(video_id: str, db: Session = Depends(get_db)) -> StreamingRespo
         writer.writeheader()
         writer.writerows(csv_rows)
         zf.writestr("commentary.csv", csv_buf.getvalue())
+
+        # timeline.exo を生成して ZIP に追加
+        exo_entries = [
+            ExoEntry(
+                audio_file=row["audio_file"].replace("/", "\\"),
+                start_time=float(row["start_time"]),
+                duration_seconds=float(row["end_time"]) - float(row["start_time"]),
+                text=row["text"],
+            )
+            for row in csv_rows
+            if row["audio_file"]
+        ]
+        seg_file = (
+            f"segments\\{Path(segments[0].storage_path).name}"
+            if segments and segments[0].storage_path
+            else ""
+        )
+        exo_config = ExoConfig(
+            fps=video.fps or 30.0,
+            total_duration=video.duration_seconds or 0.0,
+        )
+        exo_bytes = ExoGenerator().generate(seg_file, exo_entries, exo_config)
+        zf.writestr("timeline.exo", exo_bytes)
 
     buf.seek(0)
     filename = f"aituber_export_{video_id[:8]}.zip"
