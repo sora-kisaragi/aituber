@@ -5,6 +5,7 @@ interface Props {
   videoId: string
   onProcessStart: () => void
   onComposeStart: () => void
+  onComposeDone: () => void
   disabled?: boolean
 }
 
@@ -12,6 +13,7 @@ export default function PipelineControl({
   videoId,
   onProcessStart,
   onComposeStart,
+  onComposeDone,
   disabled,
 }: Props) {
   const [loading, setLoading] = useState<string | null>(null)
@@ -21,12 +23,14 @@ export default function PipelineControl({
     label: string,
     fn: () => Promise<void>,
     onStart?: () => void,
+    onDone?: () => void,
   ) => {
     setLoading(label)
     setError('')
     onStart?.()
     try {
       await fn()
+      onDone?.()
     } catch {
       setError(`${label}に失敗しました`)
     } finally {
@@ -50,7 +54,7 @@ export default function PipelineControl({
         <button
           className="px-4 py-2 bg-green-500 text-white rounded-lg font-medium text-sm hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           disabled={isDisabled}
-          onClick={() => run('合成', () => composeVideo(videoId), onComposeStart)}
+          onClick={() => run('合成', () => composeVideo(videoId), onComposeStart, onComposeDone)}
         >
           {loading === '合成' ? '合成中...' : '動画合成'}
         </button>
