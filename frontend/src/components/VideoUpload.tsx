@@ -19,8 +19,9 @@ export default function VideoUpload({ onUploaded }: Props) {
       const title = file.name.replace(/\.[^.]+$/, '')
       await uploadVideo(file, title, setPct)
       onUploaded()
-    } catch {
-      setError('アップロードに失敗しました')
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setError(`アップロード失敗: ${msg}`)
     } finally {
       setUploading(false)
       setPct(0)
