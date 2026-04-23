@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import shutil
+import subprocess
 import uuid
 import zipfile
 from pathlib import Path
@@ -168,7 +169,15 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
     )
 
     update_progress(video_id, "segmentation", 0, "動画を分割中...")
-    seg_results = seg_service.execute(video.storage_path, str(video.id))
+    try:
+        seg_results = seg_service.execute(video.storage_path, str(video.id))
+    except subprocess.CalledProcessError as e:
+        stderr = e.stderr.decode(errors="replace") if e.stderr else ""
+        logger.error("FFmpeg 分割失敗: %s", stderr)
+        raise HTTPException(status_code=500, detail=f"FFmpeg エラー: {stderr[:500]}")
+    except Exception as e:
+        logger.error("process エラー: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
     logger.info("分割完了: %d セグメント", len(seg_results))
     update_progress(video_id, "segmentation", 10, f"分割完了: {len(seg_results)} セグメント")
 
@@ -337,7 +346,15 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
     # 全字幕を結合した SRT ファイルを生成
     merged_srt = _merge_srt(srt_paths, video_id, cfg.media_root)
     output_path = str(Path(cfg.media_root) / str(video_id) / "output.mp4")
-    composer.compose(video.storage_path, audio_entries, merged_srt, output_path)
+    try:
+        composer.compose(video.storage_path, audio_entries, merged_srt, output_path)
+    except subprocess.CalledProcessError as e:
+        stderr = e.stderr.decode(errors="replace") if e.stderr else ""
+        logger.error("FFmpeg 合成失敗: %s", stderr)
+        raise HTTPException(status_code=500, detail=f"FFmpeg エラー: {stderr[:500]}")
+    except Exception as e:
+        logger.error("合成エラー: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
     logger.info("合成完了: %s", output_path)
     update_progress(video_id, "done", 100, "合成完了")
