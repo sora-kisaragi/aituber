@@ -1,0 +1,39 @@
+# VCS / CI metadata
+.git
+.github
+
+# Local assistant metadata
+.claude
+.codex
+
+# Python cache / virtualenv
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Frontend build artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Runtime outputs / large media
+media/
+sample_data/
+docker/postgres-data/
+*.mp4
+*.wav
+*.mp3
+*.srt
+*.vtt
+
+# Local environment files
+.env
+.env.local
+
+# Logs
+*.log
+logs/
