@@ -119,9 +119,7 @@ def get_timeline(video_id: str, db: Session = Depends(get_db)) -> VideoTimeline:
 
     items: list[TimelineItem] = []
     for plan in plans:
-        commentary = (
-            db.query(Commentary).filter(Commentary.utterance_plan_id == plan.id).first()
-        )
+        commentary = db.query(Commentary).filter(Commentary.utterance_plan_id == plan.id).first()
         if not commentary:
             continue
         audio = db.query(Audio).filter(Audio.commentary_id == commentary.id).first()
