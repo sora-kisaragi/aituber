@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.clients.qwen_tts_client import QwenTTSClient
 from app.config.config import get_runtime_settings, settings
