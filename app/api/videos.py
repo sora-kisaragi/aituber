@@ -20,6 +20,7 @@ from app.core.composer import AudioEntry, Composer
 from app.core.event_generation import EventService
 from app.core.exo_generator import ExoConfig, ExoEntry, ExoGenerator
 from app.core.planning import UtterancePlanner
+from app.core.progress_store import update_progress
 from app.core.prompt import CommentaryService
 from app.core.segmentation import FrameExtractor, SegmentationService
 from app.core.subtitle import SubtitleService
@@ -35,7 +36,7 @@ from app.models.models import (
     UtterancePlan,
     Video,
 )
-from app.models.schemas import VideoRead
+from app.models.schemas import TimelineItem, VideoRead, VideoTimeline
 from app.utils.logging import logger
 
 router = APIRouter()
@@ -82,12 +83,59 @@ def upload_video(
     return video
 
 
+@router.get("/", response_model=list[VideoRead])
+def list_videos(db: Session = Depends(get_db)) -> list[Video]:
+    return db.query(Video).order_by(Video.created_at.desc()).all()
+
+
 @router.get("/{video_id}", response_model=VideoRead)
 def get_video(video_id: str, db: Session = Depends(get_db)) -> Video:
     video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
         raise HTTPException(status_code=404, detail="動画が見つかりません")
     return video
+
+
+@router.get("/{video_id}/timeline", response_model=VideoTimeline)
+def get_timeline(video_id: str, db: Session = Depends(get_db)) -> VideoTimeline:
+    """動画の発話計画・実況テキスト・音声パスを一覧で返す。"""
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="動画が見つかりません")
+
+    storage = Path(video.storage_path)
+    media_root = Path(settings.media_root)
+    try:
+        input_rel = str(storage.relative_to(media_root)).replace("\\", "/")
+    except ValueError:
+        input_rel = None
+
+    plans = (
+        db.query(UtterancePlan)
+        .filter(UtterancePlan.video_id == video_id)
+        .order_by(UtterancePlan.start_time)
+        .all()
+    )
+
+    items: list[TimelineItem] = []
+    for plan in plans:
+        commentary = db.query(Commentary).filter(Commentary.utterance_plan_id == plan.id).first()
+        if not commentary:
+            continue
+        audio = db.query(Audio).filter(Audio.commentary_id == commentary.id).first()
+        audio_rel = f"{commentary.id}/audio.wav" if audio and audio.storage_path else None
+        items.append(
+            TimelineItem(
+                start_time=plan.start_time,
+                end_time=plan.end_time,
+                style=plan.style,
+                text=commentary.text,
+                commentary_id=str(commentary.id),
+                audio_rel=audio_rel,
+            )
+        )
+
+    return VideoTimeline(input_rel=input_rel, items=items)
 
 
 @router.post("/{video_id}/process")
@@ -117,12 +165,15 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
         model=settings.llm_model_name,
     )
 
+    update_progress(video_id, "segmentation", 0, "動画を分割中...")
     seg_results = seg_service.execute(video.storage_path, str(video.id))
     logger.info("分割完了: %d セグメント", len(seg_results))
+    update_progress(video_id, "segmentation", 10, f"分割完了: {len(seg_results)} セグメント")
 
     all_events = []
+    seg_count = len(seg_results)
 
-    for seg_result in seg_results:
+    for seg_idx, seg_result in enumerate(seg_results):
         segment = Segment(
             video_id=video.id,
             start_time=seg_result.start_time,
@@ -152,6 +203,9 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
             db.add(frame)
             analyses.append(analysis)
 
+        pct = 10 + int((seg_idx + 1) / seg_count * 60)
+        update_progress(video_id, "vision", pct, f"フレーム解析中: {seg_idx + 1}/{seg_count}")
+
         event_results = event_service.generate(str(segment.id), seg_result.start_time, analyses)
         for er in event_results:
             event = Event(
@@ -165,10 +219,13 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
             all_events.append(er)
 
     db.commit()
+    update_progress(video_id, "planning", 75, "発話計画を生成中...")
 
     plan_results = planner.plan(str(video.id), all_events)
+    update_progress(video_id, "planning", 80, f"発話計画完了: {len(plan_results)} 件")
     prev_text = ""
-    for pr in plan_results:
+    plan_count = len(plan_results)
+    for plan_idx, pr in enumerate(plan_results):
         plan = UtterancePlan(
             video_id=video.id,
             event_ids=pr.event_ids,
@@ -190,9 +247,12 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
             llm_raw_response=com_data["llm_raw_response"],
         )
         db.add(commentary)
+        pct = 80 + int((plan_idx + 1) / plan_count * 15)
+        update_progress(video_id, "commentary", pct, f"実況生成中: {plan_idx + 1}/{plan_count}")
         prev_text = com_data["text"]
 
     db.commit()
+    update_progress(video_id, "done", 100, "処理完了")
     return {"status": "ok", "video_id": video_id, "plans": len(plan_results)}
 
 
@@ -222,16 +282,16 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
 
     audio_entries = []
     srt_paths = []
+    plan_count = len(plans)
+    update_progress(video_id, "compose", 0, "音声合成を開始...")
 
-    for plan in plans:
-        commentary = (
-            db.query(Commentary)
-            .filter(Commentary.utterance_plan_id == plan.id)
-            .first()
-        )
+    for plan_idx, plan in enumerate(plans):
+        commentary = db.query(Commentary).filter(Commentary.utterance_plan_id == plan.id).first()
         if not commentary:
             continue
 
+        pct = int((plan_idx + 1) / plan_count * 80)
+        update_progress(video_id, "tts", pct, f"音声合成中: {plan_idx + 1}/{plan_count}")
         audio_path = str(Path(settings.media_root) / str(commentary.id) / "audio.wav")
         instruct = _STYLE_INSTRUCT.get(commentary.style or "", "")
         duration = tts_client.synthesize(commentary.text, audio_path, instruct=instruct)
@@ -258,21 +318,25 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
         )
         db.add(subtitle)
 
-        audio_entries.append(AudioEntry(
-            audio_path=audio_path,
-            start_time=plan.start_time,
-            duration_seconds=duration,
-        ))
+        audio_entries.append(
+            AudioEntry(
+                audio_path=audio_path,
+                start_time=plan.start_time,
+                duration_seconds=duration,
+            )
+        )
         srt_paths.append(srt_result.file_path)
 
     db.commit()
 
+    update_progress(video_id, "compose", 85, "字幕・動画を合成中...")
     # 全字幕を結合した SRT ファイルを生成
     merged_srt = _merge_srt(srt_paths, video_id, settings.media_root)
     output_path = str(Path(settings.media_root) / str(video_id) / "output.mp4")
     composer.compose(video.storage_path, audio_entries, merged_srt, output_path)
 
     logger.info("合成完了: %s", output_path)
+    update_progress(video_id, "done", 100, "合成完了")
     return {"status": "ok", "output_path": output_path}
 
 
@@ -281,10 +345,11 @@ def export_video(video_id: str, db: Session = Depends(get_db)) -> StreamingRespo
     """生成済みの実況データを ZIP でエクスポートする。
 
     ZIP 構成:
-      commentary.csv       — 発話一覧（start_time, end_time, text, style, audio_file, srt_file）
-      audio/               — 各発話の WAV ファイル
+      input/{filename}     — 元動画ファイル
+      audio/               — 各発話の WAV ファイル（{commentary_id}.wav）
       subtitles/           — 各発話の SRT ファイル
-      segments/            — 元動画の分割セグメント MP4
+      commentary.csv       — 発話一覧（start_time, end_time, text, style, audio_file, srt_file）
+      timeline.exo         — AviUtl 拡張編集タイムライン（元動画参照）
     """
     video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
@@ -296,36 +361,26 @@ def export_video(video_id: str, db: Session = Depends(get_db)) -> StreamingRespo
         .order_by(UtterancePlan.start_time)
         .all()
     )
-    segments = (
-        db.query(Segment)
-        .filter(Segment.video_id == video_id)
-        .order_by(Segment.start_time)
-        .all()
-    )
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        # 元動画を input/ に追加
+        input_path = Path(video.storage_path)
+        input_arcname = f"input/{input_path.name}"
+        if input_path.exists():
+            zf.write(str(input_path), input_arcname)
+
         csv_rows: list[dict] = []
 
         for plan in plans:
             commentary = (
-                db.query(Commentary)
-                .filter(Commentary.utterance_plan_id == plan.id)
-                .first()
+                db.query(Commentary).filter(Commentary.utterance_plan_id == plan.id).first()
             )
             if not commentary:
                 continue
 
-            audio = (
-                db.query(Audio)
-                .filter(Audio.commentary_id == commentary.id)
-                .first()
-            )
-            subtitle = (
-                db.query(Subtitle)
-                .filter(Subtitle.commentary_id == commentary.id)
-                .first()
-            )
+            audio = db.query(Audio).filter(Audio.commentary_id == commentary.id).first()
+            subtitle = db.query(Subtitle).filter(Subtitle.commentary_id == commentary.id).first()
 
             audio_arcname = ""
             srt_arcname = ""
@@ -338,18 +393,16 @@ def export_video(video_id: str, db: Session = Depends(get_db)) -> StreamingRespo
                 srt_arcname = f"subtitles/{commentary.id}.srt"
                 zf.write(subtitle.file_path, srt_arcname)
 
-            csv_rows.append({
-                "start_time": plan.start_time,
-                "end_time": plan.end_time,
-                "text": commentary.text,
-                "style": commentary.style,
-                "audio_file": audio_arcname,
-                "srt_file": srt_arcname,
-            })
-
-        for seg in segments:
-            if seg.storage_path and Path(seg.storage_path).exists():
-                zf.write(seg.storage_path, f"segments/{Path(seg.storage_path).name}")
+            csv_rows.append(
+                {
+                    "start_time": plan.start_time,
+                    "end_time": plan.end_time,
+                    "text": commentary.text,
+                    "style": commentary.style,
+                    "audio_file": audio_arcname,
+                    "srt_file": srt_arcname,
+                }
+            )
 
         # commentary.csv を生成して ZIP に追加
         csv_buf = io.StringIO()
@@ -361,7 +414,7 @@ def export_video(video_id: str, db: Session = Depends(get_db)) -> StreamingRespo
         writer.writerows(csv_rows)
         zf.writestr("commentary.csv", csv_buf.getvalue())
 
-        # timeline.exo を生成して ZIP に追加
+        # timeline.exo を生成して ZIP に追加（元動画を参照）
         exo_entries = [
             ExoEntry(
                 audio_file=row["audio_file"].replace("/", "\\"),
@@ -372,16 +425,13 @@ def export_video(video_id: str, db: Session = Depends(get_db)) -> StreamingRespo
             for row in csv_rows
             if row["audio_file"]
         ]
-        seg_file = (
-            f"segments\\{Path(segments[0].storage_path).name}"
-            if segments and segments[0].storage_path
-            else ""
-        )
         exo_config = ExoConfig(
             fps=video.fps or 30.0,
             total_duration=video.duration_seconds or 0.0,
         )
-        exo_bytes = ExoGenerator().generate(seg_file, exo_entries, exo_config)
+        exo_bytes = ExoGenerator().generate(
+            input_arcname.replace("/", "\\"), exo_entries, exo_config
+        )
         zf.writestr("timeline.exo", exo_bytes)
 
     buf.seek(0)

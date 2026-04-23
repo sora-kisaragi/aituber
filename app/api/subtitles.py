@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 
+from app.core.subtitle import SubtitleService
 from app.db.session import get_db
 from app.models.models import Subtitle
 from app.models.schemas import SubtitleRead
@@ -24,3 +28,17 @@ def get_subtitle(subtitle_id: str, db: Session = Depends(get_db)) -> Subtitle:
     if not subtitle:
         raise HTTPException(status_code=404, detail="字幕が見つかりません")
     return subtitle
+
+
+@router.get("/{subtitle_id}/webvtt", response_class=PlainTextResponse)
+def get_subtitle_webvtt(subtitle_id: str, db: Session = Depends(get_db)) -> PlainTextResponse:
+    """SRT 字幕を WebVTT 形式に変換して返す（video タグの <track> 用）。"""
+    subtitle = db.query(Subtitle).filter(Subtitle.id == subtitle_id).first()
+    if not subtitle:
+        raise HTTPException(status_code=404, detail="字幕が見つかりません")
+    if not subtitle.file_path or not Path(subtitle.file_path).exists():
+        raise HTTPException(status_code=404, detail="字幕ファイルが見つかりません")
+
+    srt_content = Path(subtitle.file_path).read_text(encoding="utf-8")
+    vtt_content = SubtitleService.to_webvtt(srt_content)
+    return PlainTextResponse(content=vtt_content, media_type="text/vtt")

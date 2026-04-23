@@ -55,10 +55,20 @@ class SubtitleService:
     def _build_srt(self, index: int, start: float, end: float, lines: list[str]) -> str:
         return (
             f"{index}\n"
-            f"{self._fmt_time(start)} --> {self._fmt_time(end)}\n"
-            + "\n".join(lines)
-            + "\n\n"
+            f"{self._fmt_time(start)} --> {self._fmt_time(end)}\n" + "\n".join(lines) + "\n\n"
         )
+
+    @staticmethod
+    def to_webvtt(srt_content: str) -> str:
+        """SRT テキストを WebVTT 形式に変換する。"""
+        vtt = "WEBVTT\n\n" + srt_content.replace(",", ".", 1)
+        # 全タイムスタンプ行のカンマをピリオドに置換
+        lines = []
+        for line in vtt.splitlines():
+            if "-->" in line:
+                line = line.replace(",", ".")
+            lines.append(line)
+        return "\n".join(lines)
 
     @staticmethod
     def _fmt_time(seconds: float) -> str:

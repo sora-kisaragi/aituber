@@ -8,6 +8,15 @@ from sqlalchemy.orm import relationship
 from app.db.session import Base
 
 
+class SystemSetting(Base):
+    __tablename__ = "system_settings"
+
+    key = Column(Text, primary_key=True)
+    value = Column(Text, nullable=False)
+    description = Column(Text)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class Video(Base):
     __tablename__ = "videos"
 
@@ -20,14 +29,18 @@ class Video(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     segments = relationship("Segment", back_populates="video", cascade="all, delete-orphan")
-    utterance_plans = relationship("UtterancePlan", back_populates="video", cascade="all, delete-orphan")
+    utterance_plans = relationship(
+        "UtterancePlan", back_populates="video", cascade="all, delete-orphan"
+    )
 
 
 class Segment(Base):
     __tablename__ = "segments"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    video_id = Column(UUID(as_uuid=True), ForeignKey("videos.id", ondelete="CASCADE"), nullable=False)
+    video_id = Column(
+        UUID(as_uuid=True), ForeignKey("videos.id", ondelete="CASCADE"), nullable=False
+    )
     start_time = Column(Float, nullable=False)
     end_time = Column(Float, nullable=False)
     segment_type = Column("type", Text, default="gameplay")
@@ -42,7 +55,9 @@ class Frame(Base):
     __tablename__ = "frames"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    segment_id = Column(UUID(as_uuid=True), ForeignKey("segments.id", ondelete="CASCADE"), nullable=False)
+    segment_id = Column(
+        UUID(as_uuid=True), ForeignKey("segments.id", ondelete="CASCADE"), nullable=False
+    )
     timestamp = Column(Float, nullable=False)
     image_path = Column(Text)
     features = Column(JSONB, default=dict)
@@ -54,7 +69,9 @@ class Event(Base):
     __tablename__ = "events"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    segment_id = Column(UUID(as_uuid=True), ForeignKey("segments.id", ondelete="CASCADE"), nullable=False)
+    segment_id = Column(
+        UUID(as_uuid=True), ForeignKey("segments.id", ondelete="CASCADE"), nullable=False
+    )
     timestamp = Column(Float, nullable=False)
     event_type = Column("type", Text, default="scene_change")
     importance = Column(Float, default=0.5)
@@ -67,7 +84,9 @@ class UtterancePlan(Base):
     __tablename__ = "utterance_plans"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    video_id = Column(UUID(as_uuid=True), ForeignKey("videos.id", ondelete="CASCADE"), nullable=False)
+    video_id = Column(
+        UUID(as_uuid=True), ForeignKey("videos.id", ondelete="CASCADE"), nullable=False
+    )
     event_ids = Column(JSONB, default=list)
     start_time = Column(Float, nullable=False)
     end_time = Column(Float, nullable=False)
@@ -75,7 +94,9 @@ class UtterancePlan(Base):
     style = Column(Text, default="calm")
 
     video = relationship("Video", back_populates="utterance_plans")
-    commentaries = relationship("Commentary", back_populates="utterance_plan", cascade="all, delete-orphan")
+    commentaries = relationship(
+        "Commentary", back_populates="utterance_plan", cascade="all, delete-orphan"
+    )
 
 
 class Commentary(Base):

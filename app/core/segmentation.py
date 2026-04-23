@@ -44,12 +44,14 @@ class SegmentationService:
             end = min(start + self.segment_duration, duration)
             seg_path = str(video_dir / f"segment_{index:04d}.mp4")
             self._cut_segment(video_path, start, end - start, seg_path)
-            segments.append(SegmentResult(
-                start_time=start,
-                end_time=end,
-                segment_type="gameplay",
-                storage_path=seg_path,
-            ))
+            segments.append(
+                SegmentResult(
+                    start_time=start,
+                    end_time=end,
+                    segment_type="gameplay",
+                    storage_path=seg_path,
+                )
+            )
             start = end
             index += 1
 
@@ -58,9 +60,13 @@ class SegmentationService:
     def _probe_duration(self, video_path: str) -> float:
         result = subprocess.run(
             [
-                "ffprobe", "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
                 video_path,
             ],
             capture_output=True,
@@ -72,11 +78,16 @@ class SegmentationService:
     def _cut_segment(self, video_path: str, start: float, duration: float, output: str) -> None:
         subprocess.run(
             [
-                "ffmpeg", "-y",
-                "-ss", str(start),
-                "-i", video_path,
-                "-t", str(duration),
-                "-c", "copy",
+                "ffmpeg",
+                "-y",
+                "-ss",
+                str(start),
+                "-i",
+                video_path,
+                "-t",
+                str(duration),
+                "-c",
+                "copy",
                 output,
             ],
             capture_output=True,

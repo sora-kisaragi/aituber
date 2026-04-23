@@ -30,10 +30,7 @@ class PromptGenerator:
             f"- [{e.event_type}] {e.details.get('scene_summary', '')} (importance={e.importance})"
             for e in events
         )
-        user_content = (
-            f"スタイル: {plan.style}\n"
-            f"ゲームイベント:\n{event_summary or '(情報なし)'}\n"
-        )
+        user_content = f"スタイル: {plan.style}\nゲームイベント:\n{event_summary or '(情報なし)'}\n"
         if prev_text:
             user_content += f"直前の実況: 「{prev_text}」\n"
         user_content += "上記を踏まえて実況してください。"
