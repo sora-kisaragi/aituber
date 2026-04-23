@@ -10,8 +10,8 @@ description: 新しいブランチを main から切って開発を開始する
 ## 使い方
 
 ```
-/new-feature <ブランチ名>
-例: /new-feature db-schema
+/new-feature <prefix>/<ブランチ名>
+例: /new-feature feature/db-schema
 例: /new-feature fix/tts-retry
 ```
 
@@ -19,12 +19,14 @@ description: 新しいブランチを main から切って開発を開始する
 
 1. main を最新に更新する
    ```bash
-   git checkout main && git pull origin main
+   git checkout main
+   git pull origin main
    ```
 
 2. ブランチを作成して移動する
    ```bash
-   git checkout -b feature/<ブランチ名>
+   git checkout -b <prefix>/<ブランチ名>
+   # 例: feature/db-schema, fix/tts-retry
    ```
 
 3. ブランチ名・目的をユーザーに確認して開発を開始する

@@ -31,7 +31,8 @@ description: 作業開始時に GitHub Issues を確認し、ブランチ作成�
 
 5. Issue の種別に応じたブランチを切る
    ```bash
-   git checkout main && git pull origin main
+   git checkout main
+   git pull origin main
    git checkout -b <prefix>/<issue-slug>
    # 例: feature/db-schema, fix/tts-retry
    ```
