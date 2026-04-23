@@ -3,10 +3,35 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from app.clients.qwen_tts_client import QwenTTSClient
-from app.config.config import settings
+from app.config.config import get_runtime_settings, settings
+from app.db.session import get_db
 from app.models.schemas import TTSSynthesizeRequest
+from sqlalchemy.orm import Session
 
 router = APIRouter()
+
+
+def _tts_client(db: Session) -> QwenTTSClient:
+    cfg = get_runtime_settings(db)
+    return QwenTTSClient(base_url=cfg.tts_base_url)
+
+
+@router.get("/speakers")
+def get_speakers(db: Session = Depends(get_db)) -> dict:
+    """custom_voice モードで使える話者一覧を TTS サーバーから取得して返す。"""
+    return {"speakers": _tts_client(db).list_speakers()}
+
+
+@router.get("/profiles")
+def get_profiles(db: Session = Depends(get_db)) -> dict:
+    """保存済みプロファイル一覧を TTS サーバーから取得して返す。"""
+    return {"profiles": _tts_client(db).list_profiles()}
+
+
+@router.get("/languages")
+def get_languages(db: Session = Depends(get_db)) -> dict:
+    """対応言語一覧を TTS サーバーから取得して返す。"""
+    return {"languages": _tts_client(db).list_languages()}
 
 
 @router.post("/synthesize")
