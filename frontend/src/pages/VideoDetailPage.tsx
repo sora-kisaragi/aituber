@@ -29,12 +29,24 @@ export default function VideoDetailPage() {
   const [videoKey, setVideoKey] = useState(0)
 
   // SSE は途中経過のみ（99% 上限）。POST 完了時に初めて 100% を表示する。
-  const panelProgress: Progress | null =
-    opState === 'done'
-      ? { step: 'done', pct: 100, message: '完了' }
-      : sseProgress
-        ? { ...sseProgress, pct: Math.min(sseProgress.pct, 99) }
-        : null
+  const panelProgress: Progress | null = (() => {
+    if (opState === 'done') {
+      return { step: 'done', pct: 100, message: '完了' }
+    }
+    if (!sseProgress) {
+      return null
+    }
+
+    const cappedPct = Math.min(sseProgress.pct, 99)
+    const isFinalizing =
+      sseProgress.step === 'done' || sseProgress.pct >= 100 || cappedPct >= 99
+
+    if (isFinalizing) {
+      return { step: 'finalizing', pct: 99, message: '最終処理中...' }
+    }
+
+    return { ...sseProgress, pct: cappedPct }
+  })()
 
   const startOp = () => {
     setOpState('running')

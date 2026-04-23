@@ -174,10 +174,10 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode(errors="replace") if e.stderr else ""
         logger.error("FFmpeg 分割失敗: %s", stderr)
-        raise HTTPException(status_code=500, detail=f"FFmpeg エラー: {stderr[:500]}")
+        raise HTTPException(status_code=500, detail=f"FFmpeg エラー: {stderr[:500]}") from e
     except Exception as e:
         logger.error("process エラー: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
     logger.info("分割完了: %d セグメント", len(seg_results))
     update_progress(video_id, "segmentation", 10, f"分割完了: {len(seg_results)} セグメント")
 
@@ -300,7 +300,9 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
 
     try:
         for plan_idx, plan in enumerate(plans):
-            commentary = db.query(Commentary).filter(Commentary.utterance_plan_id == plan.id).first()
+            commentary = (
+                db.query(Commentary).filter(Commentary.utterance_plan_id == plan.id).first()
+            )
             if not commentary:
                 continue
 
@@ -343,18 +345,21 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
 
         db.commit()
 
-        update_progress(video_id, "compose", 85, "字幕・動画を合成中...")
+        update_progress(video_id, "compose", 85, "字幕・動画を合成準備中...")
+        update_progress(video_id, "compose", 88, "字幕ファイルを結合中...")
         merged_srt = _merge_srt(srt_paths, video_id, cfg.media_root)
+        update_progress(video_id, "compose", 92, "映像・音声を合成中（FFmpeg）...")
         output_path = str(Path(cfg.media_root) / str(video_id) / "output.mp4")
         composer.compose(video.storage_path, audio_entries, merged_srt, output_path)
+        update_progress(video_id, "compose", 98, "最終処理中...")
 
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode(errors="replace") if e.stderr else ""
         logger.error("FFmpeg 合成失敗: %s", stderr)
-        raise HTTPException(status_code=500, detail=f"FFmpeg エラー: {stderr[:500]}")
+        raise HTTPException(status_code=500, detail=f"FFmpeg エラー: {stderr[:500]}") from e
     except Exception as e:
         logger.error("合成エラー: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
     logger.info("合成完了: %s", output_path)
     update_progress(video_id, "done", 100, "合成完了")
