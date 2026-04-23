@@ -56,9 +56,10 @@ class QwenTTSClient:
         mode = mode or self.default_mode
         speaker = speaker or self.default_speaker
         language = language or self.default_language
+        instruct = instruct or self.default_instruct
 
         endpoint = self._ENDPOINT_MAP.get(mode, f"/tts/{mode}")
-        form_data = self._build_form(endpoint, text, speaker, language)
+        form_data = self._build_form(endpoint, text, speaker, language, instruct)
 
         response: httpx.Response | None = None
         for attempt in range(self._MAX_RETRIES):
@@ -89,13 +90,20 @@ class QwenTTSClient:
         text: str,
         speaker: str,
         language: str,
+        instruct: str = "",
     ) -> dict[str, str]:
         """エンドポイントに応じた form-data を組み立てる。"""
         if "voice-clone/profile" in endpoint:
-            # profile_name は .pt 拡張子ごと渡す
+            # instruct 非対応: profile_name (.pt 拡張子ごと) のみ
             return {"text": text, "profile_name": speaker, "language": language}
-        # custom-voice / voice-design
-        return {"text": text, "speaker": speaker, "language": language}
+        if "voice-design" in endpoint:
+            # speaker 不要、instruct 必須
+            return {"text": text, "instruct": instruct, "language": language}
+        # custom-voice: instruct は任意
+        form: dict[str, str] = {"text": text, "speaker": speaker, "language": language}
+        if instruct:
+            form["instruct"] = instruct
+        return form
 
     def _wav_duration(self, wav_path: str) -> float:
         with wave.open(wav_path, "rb") as wf:

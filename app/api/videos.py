@@ -39,6 +39,16 @@ from app.utils.logging import logger
 
 router = APIRouter()
 
+# 実況スタイル → TTS instruct テキスト
+_STYLE_INSTRUCT: dict[str, str] = {
+    "excited": (
+        "Speak with high energy and excitement, "
+        "like a passionate game streamer at a climactic moment."
+    ),
+    "neutral": "Speak in a natural, conversational voice like a friendly game commentator.",
+    "calm": "Speak slowly and calmly in a relaxed, gentle voice with low energy.",
+}
+
 
 @router.post("/", response_model=VideoRead, status_code=201)
 def upload_video(
@@ -217,7 +227,8 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
             continue
 
         audio_path = str(Path(settings.media_root) / str(commentary.id) / "audio.wav")
-        duration = tts_client.synthesize(commentary.text, audio_path)
+        instruct = _STYLE_INSTRUCT.get(commentary.style or "", "")
+        duration = tts_client.synthesize(commentary.text, audio_path, instruct=instruct)
 
         audio = Audio(
             commentary_id=commentary.id,
