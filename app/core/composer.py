@@ -8,6 +8,7 @@ from pathlib import Path
 @dataclass
 class AudioEntry:
     """合成時に必要な音声情報。"""
+
     audio_path: str
     start_time: float
     duration_seconds: float
@@ -37,9 +38,13 @@ class Composer:
             source = video_path
 
         if srt_path and Path(srt_path).exists():
-            self._burn_subtitles(source, srt_path, output_path, has_separate_audio=bool(audio_entries))
+            self._burn_subtitles(
+                source, srt_path, output_path, has_separate_audio=bool(audio_entries)
+            )
         else:
-            self._copy_video(source, output_path, has_separate_audio=bool(audio_entries), original=video_path)
+            self._copy_video(
+                source, output_path, has_separate_audio=bool(audio_entries), original=video_path
+            )
 
         return output_path
 
@@ -61,10 +66,13 @@ class Composer:
 
         subprocess.run(
             [
-                "ffmpeg", "-y",
+                "ffmpeg",
+                "-y",
                 *inputs,
-                "-filter_complex", filter_complex,
-                "-map", "[out]",
+                "-filter_complex",
+                filter_complex,
+                "-map",
+                "[out]",
                 out_wav,
             ],
             capture_output=True,
@@ -81,10 +89,14 @@ class Composer:
             # source が WAV のため元動画の映像と合成する
             subprocess.run(
                 [
-                    "ffmpeg", "-y",
-                    "-i", source,
-                    "-vf", subtitle_filter,
-                    "-c:a", "aac",
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    source,
+                    "-vf",
+                    subtitle_filter,
+                    "-c:a",
+                    "aac",
                     output,
                 ],
                 capture_output=True,
@@ -93,10 +105,14 @@ class Composer:
         else:
             subprocess.run(
                 [
-                    "ffmpeg", "-y",
-                    "-i", source,
-                    "-vf", subtitle_filter,
-                    "-c:a", "copy",
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    source,
+                    "-vf",
+                    subtitle_filter,
+                    "-c:a",
+                    "copy",
                     output,
                 ],
                 capture_output=True,

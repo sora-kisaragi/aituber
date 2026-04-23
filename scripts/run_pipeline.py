@@ -4,6 +4,7 @@
 使い方:
     python scripts/run_pipeline.py --input sample.mp4 [--title "タイトル"]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -67,6 +68,7 @@ def _run_pipeline(db: Session, input_path: str, title: str) -> str:
 
     dest_path = media_dir / Path(input_path).name
     import shutil
+
     shutil.copy2(input_path, dest_path)
 
     duration, fps = probe_video_meta(str(dest_path))
@@ -203,11 +205,7 @@ def _run_pipeline(db: Session, input_path: str, title: str) -> str:
     srt_paths: list[str] = []
 
     for plan in plans_in_db:
-        commentary = (
-            db.query(Commentary)
-            .filter(Commentary.utterance_plan_id == plan.id)
-            .first()
-        )
+        commentary = db.query(Commentary).filter(Commentary.utterance_plan_id == plan.id).first()
         if not commentary:
             continue
 
@@ -240,11 +238,13 @@ def _run_pipeline(db: Session, input_path: str, title: str) -> str:
         )
         db.add(subtitle)
 
-        audio_entries.append(AudioEntry(
-            audio_path=audio_path,
-            start_time=plan.start_time,
-            duration_seconds=duration_sec,
-        ))
+        audio_entries.append(
+            AudioEntry(
+                audio_path=audio_path,
+                start_time=plan.start_time,
+                duration_seconds=duration_sec,
+            )
+        )
         srt_paths.append(srt_result.file_path)
 
     db.commit()

@@ -83,6 +83,11 @@ def upload_video(
     return video
 
 
+@router.get("/", response_model=list[VideoRead])
+def list_videos(db: Session = Depends(get_db)) -> list[Video]:
+    return db.query(Video).order_by(Video.created_at.desc()).all()
+
+
 @router.get("/{video_id}", response_model=VideoRead)
 def get_video(video_id: str, db: Session = Depends(get_db)) -> Video:
     video = db.query(Video).filter(Video.id == video_id).first()
@@ -239,11 +244,7 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
     update_progress(video_id, "compose", 0, "音声合成を開始...")
 
     for plan_idx, plan in enumerate(plans):
-        commentary = (
-            db.query(Commentary)
-            .filter(Commentary.utterance_plan_id == plan.id)
-            .first()
-        )
+        commentary = db.query(Commentary).filter(Commentary.utterance_plan_id == plan.id).first()
         if not commentary:
             continue
 
@@ -275,11 +276,13 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
         )
         db.add(subtitle)
 
-        audio_entries.append(AudioEntry(
-            audio_path=audio_path,
-            start_time=plan.start_time,
-            duration_seconds=duration,
-        ))
+        audio_entries.append(
+            AudioEntry(
+                audio_path=audio_path,
+                start_time=plan.start_time,
+                duration_seconds=duration,
+            )
+        )
         srt_paths.append(srt_result.file_path)
 
     db.commit()
@@ -316,10 +319,7 @@ def export_video(video_id: str, db: Session = Depends(get_db)) -> StreamingRespo
         .all()
     )
     segments = (
-        db.query(Segment)
-        .filter(Segment.video_id == video_id)
-        .order_by(Segment.start_time)
-        .all()
+        db.query(Segment).filter(Segment.video_id == video_id).order_by(Segment.start_time).all()
     )
 
     buf = io.BytesIO()
@@ -328,23 +328,13 @@ def export_video(video_id: str, db: Session = Depends(get_db)) -> StreamingRespo
 
         for plan in plans:
             commentary = (
-                db.query(Commentary)
-                .filter(Commentary.utterance_plan_id == plan.id)
-                .first()
+                db.query(Commentary).filter(Commentary.utterance_plan_id == plan.id).first()
             )
             if not commentary:
                 continue
 
-            audio = (
-                db.query(Audio)
-                .filter(Audio.commentary_id == commentary.id)
-                .first()
-            )
-            subtitle = (
-                db.query(Subtitle)
-                .filter(Subtitle.commentary_id == commentary.id)
-                .first()
-            )
+            audio = db.query(Audio).filter(Audio.commentary_id == commentary.id).first()
+            subtitle = db.query(Subtitle).filter(Subtitle.commentary_id == commentary.id).first()
 
             audio_arcname = ""
             srt_arcname = ""
@@ -357,14 +347,16 @@ def export_video(video_id: str, db: Session = Depends(get_db)) -> StreamingRespo
                 srt_arcname = f"subtitles/{commentary.id}.srt"
                 zf.write(subtitle.file_path, srt_arcname)
 
-            csv_rows.append({
-                "start_time": plan.start_time,
-                "end_time": plan.end_time,
-                "text": commentary.text,
-                "style": commentary.style,
-                "audio_file": audio_arcname,
-                "srt_file": srt_arcname,
-            })
+            csv_rows.append(
+                {
+                    "start_time": plan.start_time,
+                    "end_time": plan.end_time,
+                    "text": commentary.text,
+                    "style": commentary.style,
+                    "audio_file": audio_arcname,
+                    "srt_file": srt_arcname,
+                }
+            )
 
         for seg in segments:
             if seg.storage_path and Path(seg.storage_path).exists():

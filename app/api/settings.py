@@ -29,10 +29,17 @@ _DESCRIPTIONS: dict[str, str] = {
 
 # Web UI から変更を許可するキー（database_url・media_root 等はサーバー管理）
 _EDITABLE_KEYS: set[str] = {
-    "tts_base_url", "tts_default_mode", "tts_default_speaker",
-    "tts_default_language", "tts_default_instruct",
-    "llm_api_base", "llm_api_key", "llm_model_name", "vlm_model_name",
-    "segment_duration", "event_grouping_window",
+    "tts_base_url",
+    "tts_default_mode",
+    "tts_default_speaker",
+    "tts_default_language",
+    "tts_default_instruct",
+    "llm_api_base",
+    "llm_api_key",
+    "llm_model_name",
+    "vlm_model_name",
+    "segment_duration",
+    "event_grouping_window",
 }
 
 
@@ -45,11 +52,13 @@ def get_settings(db: Session = Depends(get_db)) -> list[SystemSettingRead]:
     result = []
     for key in _EDITABLE_KEYS:
         value = db_map.get(key, str(env_dict.get(key, "")))
-        result.append(SystemSettingRead(
-            key=key,
-            value=value,
-            description=_DESCRIPTIONS.get(key),
-        ))
+        result.append(
+            SystemSettingRead(
+                key=key,
+                value=value,
+                description=_DESCRIPTIONS.get(key),
+            )
+        )
     return sorted(result, key=lambda x: x.key)
 
 
@@ -67,10 +76,12 @@ def update_settings(
             row.value = item.value
             row.updated_at = datetime.utcnow()
         else:
-            db.add(SystemSetting(
-                key=item.key,
-                value=item.value,
-                description=_DESCRIPTIONS.get(item.key),
-            ))
+            db.add(
+                SystemSetting(
+                    key=item.key,
+                    value=item.value,
+                    description=_DESCRIPTIONS.get(item.key),
+                )
+            )
     db.commit()
     return get_settings(db)

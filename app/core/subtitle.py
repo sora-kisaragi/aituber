@@ -55,9 +55,7 @@ class SubtitleService:
     def _build_srt(self, index: int, start: float, end: float, lines: list[str]) -> str:
         return (
             f"{index}\n"
-            f"{self._fmt_time(start)} --> {self._fmt_time(end)}\n"
-            + "\n".join(lines)
-            + "\n\n"
+            f"{self._fmt_time(start)} --> {self._fmt_time(end)}\n" + "\n".join(lines) + "\n\n"
         )
 
     @staticmethod

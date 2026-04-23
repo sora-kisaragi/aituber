@@ -48,15 +48,17 @@ class UtterancePlanner:
                 continue
 
             end_time = event.timestamp + self.plan_duration
-            plans.append(UtterancePlanResult(
-                plan_id=str(uuid.uuid4()),
-                video_id=video_id,
-                event_ids=[event.event_id],
-                start_time=event.timestamp,
-                end_time=end_time,
-                priority=self._calc_priority(event.importance),
-                style=self._resolve_style(event.importance),
-            ))
+            plans.append(
+                UtterancePlanResult(
+                    plan_id=str(uuid.uuid4()),
+                    video_id=video_id,
+                    event_ids=[event.event_id],
+                    start_time=event.timestamp,
+                    end_time=end_time,
+                    priority=self._calc_priority(event.importance),
+                    style=self._resolve_style(event.importance),
+                )
+            )
             last_end_time = end_time
 
         return plans

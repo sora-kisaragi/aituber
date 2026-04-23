@@ -39,31 +39,35 @@ class EventService:
 
         for analysis in frame_analyses:
             importance = self._calc_importance(analysis)
-            events.append(EventResult(
-                event_id=str(uuid.uuid4()),
-                timestamp=segment_start_time,
-                event_type=self._infer_type(analysis),
-                importance=importance,
-                emotion_hint=self._emotion_hint(importance),
-                speak_recommended=importance >= 0.3,
-                details={
-                    "scene_summary": analysis.scene_summary,
-                    "objects": analysis.objects,
-                    "actions": analysis.actions,
-                },
-            ))
+            events.append(
+                EventResult(
+                    event_id=str(uuid.uuid4()),
+                    timestamp=segment_start_time,
+                    event_type=self._infer_type(analysis),
+                    importance=importance,
+                    emotion_hint=self._emotion_hint(importance),
+                    speak_recommended=importance >= 0.3,
+                    details={
+                        "scene_summary": analysis.scene_summary,
+                        "objects": analysis.objects,
+                        "actions": analysis.actions,
+                    },
+                )
+            )
 
         # フレームが存在しない場合でもデフォルトイベントを生成
         if not events:
-            events.append(EventResult(
-                event_id=str(uuid.uuid4()),
-                timestamp=segment_start_time,
-                event_type="scene_change",
-                importance=0.5,
-                emotion_hint="neutral",
-                speak_recommended=True,
-                details={},
-            ))
+            events.append(
+                EventResult(
+                    event_id=str(uuid.uuid4()),
+                    timestamp=segment_start_time,
+                    event_type="scene_change",
+                    importance=0.5,
+                    emotion_hint="neutral",
+                    speak_recommended=True,
+                    details={},
+                )
+            )
 
         return events
 
