@@ -118,6 +118,7 @@ class Composer:
                     "ffmpeg", "-y",
                     "-i", source,
                     "-vf", subtitle_filter,
+                    "-c:v", "libx264",
                     "-c:a", "copy",
                     output,
                 ],
