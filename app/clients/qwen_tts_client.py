@@ -53,9 +53,9 @@ class QwenTTSClient:
 
         最大 3 回リトライする。リクエストは multipart/form-data で送信する。
         """
-        mode = mode or self.default_mode
-        speaker = speaker or self.default_speaker
-        language = language or self.default_language
+        mode = (mode or self.default_mode).strip()
+        speaker = (speaker or self.default_speaker).strip()
+        language = (language or self.default_language).strip()
         instruct = instruct or self.default_instruct
 
         endpoint = self._ENDPOINT_MAP.get(mode, f"/tts/{mode}")

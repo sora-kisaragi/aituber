@@ -298,56 +298,56 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
     plan_count = len(plans)
     update_progress(video_id, "compose", 0, "音声合成を開始...")
 
-    for plan_idx, plan in enumerate(plans):
-        commentary = db.query(Commentary).filter(Commentary.utterance_plan_id == plan.id).first()
-        if not commentary:
-            continue
+    try:
+        for plan_idx, plan in enumerate(plans):
+            commentary = db.query(Commentary).filter(Commentary.utterance_plan_id == plan.id).first()
+            if not commentary:
+                continue
 
-        pct = int((plan_idx + 1) / plan_count * 80)
-        update_progress(video_id, "tts", pct, f"音声合成中: {plan_idx + 1}/{plan_count}")
-        audio_path = str(Path(cfg.media_root) / str(commentary.id) / "audio.wav")
-        instruct = _STYLE_INSTRUCT.get(commentary.style or "", "")
-        duration = tts_client.synthesize(commentary.text, audio_path, instruct=instruct)
+            pct = int((plan_idx + 1) / plan_count * 80)
+            update_progress(video_id, "tts", pct, f"音声合成中: {plan_idx + 1}/{plan_count}")
+            audio_path = str(Path(cfg.media_root) / str(commentary.id) / "audio.wav")
+            instruct = _STYLE_INSTRUCT.get(commentary.style or "", "")
+            duration = tts_client.synthesize(commentary.text, audio_path, instruct=instruct)
 
-        audio = Audio(
-            commentary_id=commentary.id,
-            storage_path=audio_path,
-            duration_seconds=duration,
-        )
-        db.add(audio)
-
-        srt_result = subtitle_service.generate(
-            commentary.text,
-            plan.start_time,
-            duration,
-            str(commentary.id),
-            cfg.media_root,
-        )
-        subtitle = Subtitle(
-            commentary_id=commentary.id,
-            file_path=srt_result.file_path,
-            start_time=srt_result.start_time,
-            end_time=srt_result.end_time,
-        )
-        db.add(subtitle)
-
-        audio_entries.append(
-            AudioEntry(
-                audio_path=audio_path,
-                start_time=plan.start_time,
+            audio = Audio(
+                commentary_id=commentary.id,
+                storage_path=audio_path,
                 duration_seconds=duration,
             )
-        )
-        srt_paths.append(srt_result.file_path)
+            db.add(audio)
 
-    db.commit()
+            srt_result = subtitle_service.generate(
+                commentary.text,
+                plan.start_time,
+                duration,
+                str(commentary.id),
+                cfg.media_root,
+            )
+            subtitle = Subtitle(
+                commentary_id=commentary.id,
+                file_path=srt_result.file_path,
+                start_time=srt_result.start_time,
+                end_time=srt_result.end_time,
+            )
+            db.add(subtitle)
 
-    update_progress(video_id, "compose", 85, "字幕・動画を合成中...")
-    # 全字幕を結合した SRT ファイルを生成
-    merged_srt = _merge_srt(srt_paths, video_id, cfg.media_root)
-    output_path = str(Path(cfg.media_root) / str(video_id) / "output.mp4")
-    try:
+            audio_entries.append(
+                AudioEntry(
+                    audio_path=audio_path,
+                    start_time=plan.start_time,
+                    duration_seconds=duration,
+                )
+            )
+            srt_paths.append(srt_result.file_path)
+
+        db.commit()
+
+        update_progress(video_id, "compose", 85, "字幕・動画を合成中...")
+        merged_srt = _merge_srt(srt_paths, video_id, cfg.media_root)
+        output_path = str(Path(cfg.media_root) / str(video_id) / "output.mp4")
         composer.compose(video.storage_path, audio_entries, merged_srt, output_path)
+
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode(errors="replace") if e.stderr else ""
         logger.error("FFmpeg 合成失敗: %s", stderr)
