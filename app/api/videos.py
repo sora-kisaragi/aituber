@@ -37,7 +37,7 @@ from app.models.models import (
     UtterancePlan,
     Video,
 )
-from app.models.schemas import TimelineItem, VideoRead, VideoTimeline
+from app.models.schemas import TimelineItem, VideoRead, VideoTimeline, VideoUpdate
 from app.utils.logging import logger
 
 router = APIRouter()
@@ -134,6 +134,36 @@ def get_video(video_id: str, db: Session = Depends(get_db)) -> Video:
     video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
         raise HTTPException(status_code=404, detail="動画が見つかりません")
+    return video
+
+
+@router.patch("/{video_id}", response_model=VideoRead)
+def update_video(video_id: str, payload: VideoUpdate, db: Session = Depends(get_db)) -> Video:
+    """動画のタイトル・タグを更新する。"""
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="動画が見つかりません")
+
+    if payload.title is not None:
+        new_title = payload.title.strip()
+        if not new_title:
+            raise HTTPException(status_code=400, detail="タイトルが空です")
+        video.title = new_title
+
+    if payload.tags is not None:
+        metadata = dict(video.video_metadata or {})
+        metadata["tags"] = _normalize_tags(payload.tags)
+        video.video_metadata = metadata
+
+    try:
+        db.add(video)
+        db.commit()
+        db.refresh(video)
+    except Exception as e:
+        db.rollback()
+        logger.error("動画更新失敗: %s", e)
+        raise HTTPException(status_code=500, detail="動画更新に失敗しました") from e
+
     return video
 
 
@@ -528,6 +558,21 @@ def _merge_srt(srt_paths: list[str], video_id: str, media_root: str) -> str | No
         for path in valid:
             out.write(Path(path).read_text(encoding="utf-8"))
     return str(merged_path)
+
+
+def _normalize_tags(tags: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw in tags:
+        tag = raw.strip()
+        if not tag:
+            continue
+        key = tag.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(tag)
+    return normalized
 
 
 def _generate_thumbnail(video_path: str, thumbnail_path: str) -> None:
