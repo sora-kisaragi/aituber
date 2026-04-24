@@ -15,6 +15,15 @@ description: 作業開始時に GitHub Issues を確認し、ブランチ作成�
 
 ## 手順
 
+0. 事前チェック（必須）
+   ```bash
+   command -v gh
+   gh auth status
+   ```
+   - `gh` が未導入、または未ログインの場合は処理を止める
+   - `sudo` が必要なインストールや認証操作は、必ずユーザーに実行を依頼する
+   - ユーザーの確認なしに API フォールバックや別経路で先に進めない
+
 1. Open な Issue 一覧を取得する
    ```bash
    gh issue list --repo sora-kisaragi/aituber --state open --label "phase:mvp"
@@ -41,6 +50,12 @@ description: 作業開始時に GitHub Issues を確認し、ブランチ作成�
    ```bash
    gh issue comment <番号> --body "作業開始します。ブランチ: \`<ブランチ名>\`"
    ```
+
+## 実行エラー時の原則
+
+- 権限不足・コマンド未導入・認証未完了で止まったら、まずユーザーに状況を共有して実行依頼する
+- 例: `gh` 未導入時は「ユーザー側で `sudo apt install gh`（または環境に合う方法）を実行してよいか」を確認する
+- ユーザーが代替手段を明示的に希望した場合のみ、API 取得などの代替フローへ切り替える
 
 ## フェーズラベルの見方
 
