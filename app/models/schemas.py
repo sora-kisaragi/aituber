@@ -19,7 +19,7 @@ class VideoRead(BaseModel):
     duration_seconds: float | None
     fps: float | None
     storage_path: str
-    video_metadata: dict[str, Any] | None = None
+    video_metadata: dict[str, Any]
     created_at: datetime | None
 
 
