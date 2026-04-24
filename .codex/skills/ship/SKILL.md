@@ -79,8 +79,14 @@ description: 現在のブランチの変更をコミット → push → PR 作�
 5. マージと後処理
    ```bash
    gh pr merge <PR番号> --merge --delete-branch
+   git checkout main
+   git pull origin main
+   git branch -d <作業ブランチ>
+   git push origin --delete <作業ブランチ> || true
    git worktree remove --force /tmp/<repo>-ship
    ```
+
+- 方針: PR マージ後は、不要になったブランチを削除して `main` に戻した状態を作業の終了条件にする
 
 ## コミットメッセージ規則
 

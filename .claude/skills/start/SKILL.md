@@ -51,6 +51,18 @@ description: 作業開始時に GitHub Issues を確認し、ブランチ作成�
    gh issue comment <番号> --body "作業開始します。ブランチ: \`<ブランチ名>\`"
    ```
 
+## 運用ルール（完了時）
+
+- 対象 Issue の PR をマージしたら、不要になった作業ブランチは削除する
+- マージ作業後は `main` に戻る
+- 例:
+  ```bash
+  git checkout main
+  git pull origin main
+  git branch -d <作業ブランチ>
+  git push origin --delete <作業ブランチ>
+  ```
+
 ## 実行エラー時の原則
 
 - 権限不足・コマンド未導入・認証未完了で止まったら、まずユーザーに状況を共有して実行依頼する
