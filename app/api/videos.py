@@ -29,9 +29,9 @@ from app.core.segmentation import FrameExtractor, SegmentationService
 from app.core.subtitle import SubtitleService
 from app.core.tags import (
     build_tag_source_map,
-    mark_llm_tag_status_skipped,
     normalize_video_metadata,
 )
+from app.core.video_tagging import refresh_llm_tags
 from app.core.vision import VisionService
 from app.db.session import get_db
 from app.models.models import (
@@ -211,12 +211,23 @@ def refresh_video_rule_tags(video_id: str, db: Session = Depends(get_db)) -> Vid
 
 @router.post("/{video_id}/tags/llm:refresh", response_model=VideoTagRead)
 def refresh_video_llm_tags(video_id: str, db: Session = Depends(get_db)) -> VideoTagRead:
-    """LLM タグ再生成を実行する（現状は未実装のためスキップ）。"""
+    """LLM タグを再生成する。"""
     video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
         raise HTTPException(status_code=404, detail="動画が見つかりません")
 
-    metadata = _refresh_llm_tags(video.video_metadata)
+    cfg = get_runtime_settings(db)
+    llm_client = LLMClient(
+        base_url=cfg.llm_api_base,
+        api_key=cfg.llm_api_key,
+        model=cfg.llm_model_name,
+    )
+    metadata = refresh_llm_tags(
+        video_id=str(video.id),
+        video_title=video.title,
+        raw_metadata=video.video_metadata,
+        llm_client=llm_client,
+    )
     video.video_metadata = metadata
 
     try:
@@ -239,8 +250,18 @@ def refresh_video_tags(video_id: str, db: Session = Depends(get_db)) -> VideoTag
         raise HTTPException(status_code=404, detail="動画が見つかりません")
 
     cfg = get_runtime_settings(db)
+    llm_client = LLMClient(
+        base_url=cfg.llm_api_base,
+        api_key=cfg.llm_api_key,
+        model=cfg.llm_model_name,
+    )
     metadata = _refresh_rule_tags(video, cfg)
-    metadata = _refresh_llm_tags(metadata)
+    metadata = refresh_llm_tags(
+        video_id=str(video.id),
+        video_title=video.title,
+        raw_metadata=metadata,
+        llm_client=llm_client,
+    )
     video.video_metadata = metadata
 
     try:
@@ -305,7 +326,19 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(status_code=404, detail="動画が見つかりません")
 
     cfg = get_runtime_settings(db)
-    video.video_metadata = _refresh_rule_tags(video, cfg)
+    llm_client = LLMClient(
+        base_url=cfg.llm_api_base,
+        api_key=cfg.llm_api_key,
+        model=cfg.llm_model_name,
+    )
+    metadata = _refresh_rule_tags(video, cfg)
+    metadata = refresh_llm_tags(
+        video_id=str(video.id),
+        video_title=video.title,
+        raw_metadata=metadata,
+        llm_client=llm_client,
+    )
+    video.video_metadata = metadata
     db.add(video)
     db.commit()
 
@@ -330,12 +363,6 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
         max_queue_delay_seconds=cfg.planner_max_queue_delay_seconds,
     )
     commentary_service = CommentaryService()
-    llm_client = LLMClient(
-        base_url=cfg.llm_api_base,
-        api_key=cfg.llm_api_key,
-        model=cfg.llm_model_name,
-    )
-
     update_progress(video_id, "segmentation", 0, "動画を分割中...")
     try:
         seg_results = seg_service.execute(video.storage_path, str(video.id))
@@ -750,11 +777,6 @@ def _refresh_rule_tags(video: Video, cfg: Any) -> dict[str, Any]:
     tag_status["rule"] = "ready"
     metadata["tag_status"] = tag_status
     return normalize_video_metadata(metadata)
-
-
-def _refresh_llm_tags(raw_metadata: dict[str, Any] | None) -> dict[str, Any]:
-    """LLM タグ更新をスキップし、状態のみ更新する。"""
-    return mark_llm_tag_status_skipped(raw_metadata)
 
 
 def _to_video_tag_read(raw_metadata: dict[str, Any] | None) -> VideoTagRead:

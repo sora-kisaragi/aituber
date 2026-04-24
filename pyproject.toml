@@ -52,3 +52,6 @@ ignore = ["E501", "B008"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-v"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
