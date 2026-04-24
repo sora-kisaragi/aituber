@@ -25,6 +25,7 @@ from app.core.progress_store import update_progress
 from app.core.prompt import CommentaryService
 from app.core.segmentation import FrameExtractor, SegmentationService
 from app.core.subtitle import SubtitleService
+from app.core.tags import normalize_video_metadata
 from app.core.vision import VisionService
 from app.db.session import get_db
 from app.models.models import (
@@ -58,7 +59,7 @@ def upload_video(
     title: str = Query(default=""),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-) -> Video:
+) -> VideoRead:
     """動画ファイルをアップロードして DB に登録する。"""
     video_id = uuid.uuid4()
     media_dir = Path(settings.media_root) / str(video_id)
@@ -89,17 +90,19 @@ def upload_video(
         duration_seconds=duration,
         fps=fps,
         storage_path=str(dest_path),
+        video_metadata=normalize_video_metadata(None),
     )
     db.add(video)
     db.commit()
     db.refresh(video)
     logger.info("動画登録: video_id=%s", video_id)
-    return video
+    return _to_video_read(video)
 
 
 @router.get("/", response_model=list[VideoRead])
-def list_videos(db: Session = Depends(get_db)) -> list[Video]:
-    return db.query(Video).order_by(Video.created_at.desc()).all()
+def list_videos(db: Session = Depends(get_db)) -> list[VideoRead]:
+    videos = db.query(Video).order_by(Video.created_at.desc()).all()
+    return [_to_video_read(video) for video in videos]
 
 
 @router.delete("/{video_id}")
@@ -130,15 +133,15 @@ def delete_video(video_id: str, db: Session = Depends(get_db)) -> dict:
 
 
 @router.get("/{video_id}", response_model=VideoRead)
-def get_video(video_id: str, db: Session = Depends(get_db)) -> Video:
+def get_video(video_id: str, db: Session = Depends(get_db)) -> VideoRead:
     video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
         raise HTTPException(status_code=404, detail="動画が見つかりません")
-    return video
+    return _to_video_read(video)
 
 
 @router.patch("/{video_id}", response_model=VideoRead)
-def update_video(video_id: str, payload: VideoUpdate, db: Session = Depends(get_db)) -> Video:
+def update_video(video_id: str, payload: VideoUpdate, db: Session = Depends(get_db)) -> VideoRead:
     """動画のタイトル・タグを更新する。"""
     video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
@@ -151,9 +154,9 @@ def update_video(video_id: str, payload: VideoUpdate, db: Session = Depends(get_
         video.title = new_title
 
     if payload.tags is not None:
-        metadata = dict(video.video_metadata or {})
-        metadata["tags"] = _normalize_tags(payload.tags)
-        video.video_metadata = metadata
+        metadata = normalize_video_metadata(video.video_metadata)
+        metadata["tags_manual"] = _normalize_tags(payload.tags)
+        video.video_metadata = normalize_video_metadata(metadata)
 
     try:
         db.add(video)
@@ -164,7 +167,7 @@ def update_video(video_id: str, payload: VideoUpdate, db: Session = Depends(get_
         logger.error("動画更新失敗: %s", e)
         raise HTTPException(status_code=500, detail="動画更新に失敗しました") from e
 
-    return video
+    return _to_video_read(video)
 
 
 @router.get("/{video_id}/timeline", response_model=VideoTimeline)
@@ -215,6 +218,7 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
     video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
         raise HTTPException(status_code=404, detail="動画が見つかりません")
+    video.video_metadata = normalize_video_metadata(video.video_metadata)
 
     cfg = get_runtime_settings(db)
 
@@ -627,4 +631,18 @@ def _generate_thumbnail(video_path: str, thumbnail_path: str) -> None:
         ],
         check=True,
         capture_output=True,
+    )
+
+
+def _to_video_read(video: Video) -> VideoRead:
+    """動画レスポンス用にタグメタデータを正規化する。"""
+    metadata = normalize_video_metadata(video.video_metadata)
+    return VideoRead(
+        id=video.id,
+        title=video.title,
+        duration_seconds=video.duration_seconds,
+        fps=video.fps,
+        storage_path=video.storage_path,
+        video_metadata=metadata,
+        created_at=video.created_at,
     )
