@@ -24,12 +24,13 @@ description: 作業開始時に GitHub Issues を確認し、ブランチ作成�
    - `sudo` が必要なインストールや認証操作は、必ずユーザーに実行を依頼する
    - ユーザーの確認なしに API フォールバックや別経路で先に進めない
 
-1. Open な Issue 一覧を取得する
+1. Open な Issue 一覧を取得する（`phase:mvp` 以外も含む）
    ```bash
-   gh issue list --repo sora-kisaragi/aituber --state open --label "phase:mvp"
+   gh issue list --repo sora-kisaragi/aituber --state open --limit 100 \
+     --search 'label:"phase:mvp" OR label:"phase:quality" OR label:"phase:ops"'
    ```
 
-2. ラベル・番号を確認して作業候補を提示する
+2. フェーズラベル（`phase:mvp` / `phase:quality` / `phase:ops`）と番号を確認して作業候補を提示する
 
 3. ユーザーが取り掛かる Issue を選ぶ
 
