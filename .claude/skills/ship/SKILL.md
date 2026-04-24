@@ -47,6 +47,7 @@ description: 現在のブランチの変更をコミット → push → PR 作�
    git diff --stat
    pre-commit run --all-files
    ```
+   - すでに対象コミットを作成済みで作業ツリーが clean の場合は、手順2をスキップして手順3へ進む
 
 2. ステージングとコミット
    ```bash
@@ -87,7 +88,7 @@ description: 現在のブランチの変更をコミット → push → PR 作�
    if git ls-remote --exit-code --heads origin <作業ブランチ> >/dev/null 2>&1; then
      git push origin --delete <作業ブランチ>
    fi
-   git worktree remove --force /tmp/<repo>-ship
+   git worktree remove --force /tmp/<repo>-ship || true
    ```
 
 - 方針: PR マージ後は、不要になったブランチを削除して `main` に戻した状態を作業の終了条件にする
