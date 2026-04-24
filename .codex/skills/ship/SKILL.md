@@ -81,8 +81,10 @@ description: 現在のブランチの変更をコミット → push → PR 作�
    gh pr merge <PR番号> --merge --delete-branch
    git checkout main
    git pull origin main
-   git branch -d <作業ブランチ>
-   git push origin --delete <作業ブランチ> || true
+   git branch -d <作業ブランチ> || true
+   if git ls-remote --exit-code --heads origin <作業ブランチ> >/dev/null 2>&1; then
+     git push origin --delete <作業ブランチ>
+   fi
    git worktree remove --force /tmp/<repo>-ship
    ```
 
