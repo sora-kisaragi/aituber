@@ -19,6 +19,10 @@ export async function getVideo(id: string): Promise<Video> {
   return data
 }
 
+export async function deleteVideo(id: string): Promise<void> {
+  await api.delete(`/videos/${id}`)
+}
+
 export async function uploadVideo(
   file: File,
   title: string,

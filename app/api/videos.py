@@ -68,7 +68,20 @@ def upload_video(
     with open(dest_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    duration, fps = _probe_video_meta(str(dest_path))
+    try:
+        duration, fps = _probe_video_meta(str(dest_path))
+    except Exception as e:
+        logger.error("動画メタ情報取得失敗: %s", e)
+        shutil.rmtree(media_dir, ignore_errors=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    try:
+        _generate_thumbnail(str(dest_path), str(media_dir / "thumbnail.jpg"))
+    except subprocess.CalledProcessError as e:
+        stderr = e.stderr.decode(errors="replace") if e.stderr else ""
+        logger.error("サムネイル生成失敗: %s", stderr)
+    except Exception as e:
+        logger.error("サムネイル生成失敗: %s", e)
 
     video = Video(
         id=video_id,
@@ -87,6 +100,33 @@ def upload_video(
 @router.get("/", response_model=list[VideoRead])
 def list_videos(db: Session = Depends(get_db)) -> list[Video]:
     return db.query(Video).order_by(Video.created_at.desc()).all()
+
+
+@router.delete("/{video_id}")
+def delete_video(video_id: str, db: Session = Depends(get_db)) -> dict:
+    """動画レコードと関連メディアを削除する。"""
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="動画が見つかりません")
+
+    media_dir = Path(settings.media_root) / str(video.id)
+    try:
+        if media_dir.exists():
+            shutil.rmtree(media_dir)
+    except Exception as e:
+        logger.error("動画ディレクトリ削除失敗: %s", e)
+        raise HTTPException(status_code=500, detail="メディア削除に失敗しました") from e
+
+    try:
+        db.delete(video)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error("動画レコード削除失敗: %s", e)
+        raise HTTPException(status_code=500, detail="動画削除に失敗しました") from e
+
+    logger.info("動画削除: video_id=%s", video_id)
+    return {"status": "ok", "video_id": video_id}
 
 
 @router.get("/{video_id}", response_model=VideoRead)
@@ -525,3 +565,21 @@ def _merge_srt(srt_paths: list[str], video_id: str, media_root: str) -> str | No
         for path in valid:
             out.write(Path(path).read_text(encoding="utf-8"))
     return str(merged_path)
+
+
+def _generate_thumbnail(video_path: str, thumbnail_path: str) -> None:
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            video_path,
+            "-ss",
+            "00:00:01",
+            "-frames:v",
+            "1",
+            thumbnail_path,
+        ],
+        check=True,
+        capture_output=True,
+    )
