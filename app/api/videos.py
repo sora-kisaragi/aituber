@@ -160,7 +160,14 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
         model=cfg.vlm_model_name,
     )
     event_service = EventService()
-    planner = UtterancePlanner()
+    planner = UtterancePlanner(
+        min_silence_seconds=cfg.planner_min_silence_seconds,
+        plan_duration=cfg.planner_plan_duration_seconds,
+        speak_threshold=cfg.planner_speak_threshold,
+        max_talk_ratio=cfg.planner_max_talk_ratio,
+        talk_window_seconds=cfg.planner_talk_window_seconds,
+        max_queue_delay_seconds=cfg.planner_max_queue_delay_seconds,
+    )
     commentary_service = CommentaryService()
     llm_client = LLMClient(
         base_url=cfg.llm_api_base,
@@ -293,8 +300,9 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
         .all()
     )
 
-    audio_entries = []
-    srt_paths = []
+    pending_entries: list[tuple[UtterancePlan, Commentary, AudioEntry]] = []
+    audio_entries: list[AudioEntry] = []
+    srt_paths: list[str] = []
     plan_count = len(plans)
     update_progress(video_id, "compose", 0, "音声合成を開始...")
 
@@ -319,10 +327,40 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
             )
             db.add(audio)
 
+            pending_entries.append(
+                (
+                    plan,
+                    commentary,
+                    AudioEntry(
+                        audio_path=audio_path,
+                        start_time=plan.start_time,
+                        duration_seconds=duration,
+                    ),
+                )
+            )
+
+        normalized_entries = composer.schedule_entries(
+            [entry for _, _, entry in pending_entries],
+            min_gap_seconds=cfg.compose_overlap_min_gap_seconds,
+        )
+
+        for index, (plan, commentary, _) in enumerate(pending_entries):
+            normalized = normalized_entries[index]
+            if abs(normalized.start_time - plan.start_time) > 1e-6:
+                logger.info(
+                    "発話開始時刻を調整: plan_id=%s old=%.3f new=%.3f",
+                    plan.id,
+                    plan.start_time,
+                    normalized.start_time,
+                )
+
+            plan.start_time = normalized.start_time
+            plan.end_time = normalized.start_time + normalized.duration_seconds
+
             srt_result = subtitle_service.generate(
                 commentary.text,
-                plan.start_time,
-                duration,
+                normalized.start_time,
+                normalized.duration_seconds,
                 str(commentary.id),
                 cfg.media_root,
             )
@@ -333,12 +371,11 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
                 end_time=srt_result.end_time,
             )
             db.add(subtitle)
-
             audio_entries.append(
                 AudioEntry(
-                    audio_path=audio_path,
-                    start_time=plan.start_time,
-                    duration_seconds=duration,
+                    audio_path=normalized.audio_path,
+                    start_time=normalized.start_time,
+                    duration_seconds=normalized.duration_seconds,
                 )
             )
             srt_paths.append(srt_result.file_path)

@@ -44,3 +44,40 @@ class TestUtterancePlanner:
         )
         plans = self.planner.plan("vid-1", [event])
         assert len(plans) == 0
+
+    def test_low_importance_is_silenced_by_threshold(self) -> None:
+        planner = UtterancePlanner(
+            min_silence_seconds=0.0,
+            plan_duration=2.0,
+            speak_threshold=0.6,
+        )
+        events = [_make_event(0.0, importance=0.5)]
+        plans = planner.plan("vid-1", events)
+        assert len(plans) == 0
+
+    def test_start_time_shifted_when_overlap_would_happen(self) -> None:
+        planner = UtterancePlanner(
+            min_silence_seconds=1.0,
+            plan_duration=3.0,
+            max_queue_delay_seconds=5.0,
+        )
+        events = [_make_event(0.0, importance=0.9), _make_event(1.0, importance=0.9)]
+        plans = planner.plan("vid-1", events)
+        assert len(plans) == 2
+        assert plans[0].start_time == 0.0
+        assert plans[1].start_time == 4.0
+
+    def test_talk_ratio_limit_creates_silence(self) -> None:
+        planner = UtterancePlanner(
+            min_silence_seconds=0.0,
+            plan_duration=3.0,
+            max_talk_ratio=0.4,
+            talk_window_seconds=10.0,
+            max_queue_delay_seconds=0.0,
+        )
+        events = [
+            _make_event(0.0, importance=0.9),
+            _make_event(5.0, importance=0.9),
+        ]
+        plans = planner.plan("vid-1", events)
+        assert len(plans) == 1

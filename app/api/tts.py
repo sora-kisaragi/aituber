@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 
 from app.clients.qwen_tts_client import QwenTTSClient
 from app.config.config import get_runtime_settings, settings
 from app.db.session import get_db
 from app.models.schemas import TTSSynthesizeRequest
-from sqlalchemy.orm import Session
 
 router = APIRouter()
 
