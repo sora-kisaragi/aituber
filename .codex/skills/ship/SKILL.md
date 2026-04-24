@@ -21,13 +21,25 @@ description: 現在のブランチの変更をコミット → push → PR 作�
    git status --short
    ```
    - 対象 Issue と無関係な変更がある場合は、そのまま `push/PR` しない
-   - dirty の場合は一時 worktree でクリーンな PR 用ブランチを作る
+   - dirty の場合は次のどれかで整理する
+     - 推奨: 一時 worktree で隔離して進める（元の汚れは触らない）
      ```bash
      git worktree add /tmp/<repo>-ship main
      cd /tmp/<repo>-ship
      git checkout -b <prefix>/<issue-slug>-pr
      git cherry-pick <対象コミット>
      ```
+     - 同じ作業ツリーを使う必要がある場合: 変更を一時退避する
+      ```bash
+      git stash push -u -m "wip-before-ship"
+      # ship 完了後
+      git stash pop
+      ```
+     - 改行差分だけを疑う場合: まず確認する
+      ```bash
+      git diff --ignore-cr-at-eol --stat
+      ```
+   - 変更破棄（`git restore` など）はユーザー確認なしで実行しない
 
 1. 変更ファイルと pre-commit を確認する
    ```bash
