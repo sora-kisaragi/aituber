@@ -19,7 +19,13 @@ class VideoRead(BaseModel):
     duration_seconds: float | None
     fps: float | None
     storage_path: str
+    video_metadata: dict[str, Any] | None = None
     created_at: datetime | None
+
+
+class VideoUpdate(BaseModel):
+    title: str | None = None
+    tags: list[str] | None = None
 
 
 class SegmentRead(BaseModel):

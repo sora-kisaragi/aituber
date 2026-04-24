@@ -6,6 +6,10 @@ export interface Video {
   duration_seconds: number | null
   fps: number | null
   storage_path: string
+  video_metadata: {
+    tags?: string[]
+    [key: string]: unknown
+  } | null
   created_at: string | null
 }
 
@@ -16,6 +20,23 @@ export async function listVideos(): Promise<Video[]> {
 
 export async function getVideo(id: string): Promise<Video> {
   const { data } = await api.get<Video>(`/videos/${id}`)
+  return data
+}
+
+export async function deleteVideo(id: string): Promise<void> {
+  await api.delete(`/videos/${id}`)
+}
+
+export interface VideoUpdatePayload {
+  title?: string
+  tags?: string[]
+}
+
+export async function updateVideo(
+  id: string,
+  payload: VideoUpdatePayload,
+): Promise<Video> {
+  const { data } = await api.patch<Video>(`/videos/${id}`, payload)
   return data
 }
 

@@ -19,7 +19,7 @@ export default function VideosPage() {
       {isLoading ? (
         <p className="text-gray-400 text-center py-8">読み込み中...</p>
       ) : (
-        <VideoList videos={videos} />
+        <VideoList videos={videos} onChanged={refetch} />
       )}
     </div>
   )
