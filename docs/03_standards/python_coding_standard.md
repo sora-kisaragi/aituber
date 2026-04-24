@@ -1,8 +1,8 @@
 # Python コーディング規約 — aituber
 
-**Version:** 1.2
+**Version:** 1.3
 **作成日:** 2025-12-25
-**最終更新:** 2026-02-17
+**最終更新:** 2026-04-24
 **作成者:** 宗廣 颯真
 **対象:** Python による開発全般（Web / バッチ / スクリプト）
 
@@ -27,9 +27,18 @@
 ## コーディング時の基本ルール
 
 - スタイル統一のため Linter（ruff）を使用
-- コード整形のため black を使用（`line-length = 120`）
-- import 整形に ruff を使用
-- 型品質向上のため mypy を推奨（`strict = true`）
+- コード整形は `ruff format` を使用（`line-length = 100`）
+- import 整形は Ruff の `I` ルールで実施する（isort 単体は使用しない）
+- テストは `pytest` で実行する
+
+### 標準コマンド
+
+```bash
+ruff check .
+ruff format .
+pytest tests/ -v
+pre-commit run --all-files
+```
 
 ---
 
@@ -103,7 +112,7 @@ aituber/
 ## コードスタイル
 
 - インデント: スペース 4（タブ禁止）
-- 行の長さ: 120 文字以内（black / ruff で統一）
+- 行の長さ: 100 文字以内（ruff の設定に従う）
 - 文字コード: UTF-8
 - import の順序: 標準ライブラリ → サードパーティ → アプリ内部
 
@@ -324,19 +333,17 @@ logger.error("TTS 生成失敗: segment_id=%s", segment_id, exc_info=True)
 ### 命名規則
 
 ```
-test_functionName_expectedBehavior
+test_<対象>_<条件>_<期待結果>
 ```
 
-規約に従い `camelCase` の関数名部分を維持する（アンダースコア区切りではなく）:
-
 ```python
-def test_fetchUser_returns_user_when_exists():
+def test_fetch_user_when_exists_returns_user():
     ...
 
-def test_fetchUser_raises_UserNotFound_when_missing():
+def test_fetch_user_when_missing_raises_user_not_found():
     ...
 
-def test_generateEvent_returns_default_when_vlm_empty():
+def test_generate_event_when_vlm_empty_returns_default():
     ...
 ```
 
@@ -381,7 +388,7 @@ def mock_tts_client():
 ### テストの構造（Arrange / Act / Assert）
 
 ```python
-def test_generateEvent_returns_event_when_normal_scene(mock_vision_service):
+def test_generate_event_when_normal_scene_returns_event(mock_vision_service):
     # Arrange（準備）
     service = EventService(vision=mock_vision_service)
     mock_vision_service.analyze_frame.return_value = {
@@ -483,25 +490,16 @@ def _build_prompt(plan: UtterancePlan) -> str:
 ## 付録：pyproject.toml 設定例
 
 ```toml
-[tool.black]
-line-length = 120
-
 [tool.ruff]
-line-length = 120
+line-length = 100
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
-ignore = ["E501"]
+ignore = ["E501", "B008"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]
-
-[tool.isort]
-profile = "black"
-
-[tool.mypy]
-ignore_missing_imports = true
-strict = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
