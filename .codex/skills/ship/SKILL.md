@@ -16,6 +16,19 @@ description: 現在のブランチの変更をコミット → push → PR 作�
 
 ## 手順
 
+0. 作業ツリーの汚れを確認する
+   ```bash
+   git status --short
+   ```
+   - 対象 Issue と無関係な変更がある場合は、そのまま `push/PR` しない
+   - dirty の場合は一時 worktree でクリーンな PR 用ブランチを作る
+     ```bash
+     git worktree add /tmp/<repo>-ship main
+     cd /tmp/<repo>-ship
+     git checkout -b <prefix>/<issue-slug>-pr
+     git cherry-pick <対象コミット>
+     ```
+
 1. 変更ファイルと pre-commit を確認する
    ```bash
    git status
@@ -49,6 +62,12 @@ description: 現在のブランチの変更をコミット → push → PR 作�
    - [ ] テスト追加（該当時）
    - [ ] pre-commit 通過
    '@ | gh pr create --title "<type>: <概要>" --body-file -
+   ```
+
+5. マージと後処理
+   ```bash
+   gh pr merge <PR番号> --merge --delete-branch
+   git worktree remove --force /tmp/<repo>-ship
    ```
 
 ## コミットメッセージ規則
