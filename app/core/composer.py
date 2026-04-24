@@ -36,8 +36,9 @@ class Composer:
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
         if audio_entries:
+            safe_audio_entries = self.schedule_entries(audio_entries)
             mixed_audio = str(Path(output_path).parent / "mixed_audio.wav")
-            self._mix_audio(video_path, audio_entries, mixed_audio)
+            self._mix_audio(video_path, safe_audio_entries, mixed_audio)
             source = mixed_audio
         else:
             source = video_path
@@ -56,6 +57,34 @@ class Composer:
             )
 
         return output_path
+
+    def schedule_entries(
+        self,
+        entries: list[AudioEntry],
+        min_gap_seconds: float = 0.0,
+    ) -> list[AudioEntry]:
+        """重複しないように音声エントリ開始時刻を正規化する。"""
+        if not entries:
+            return []
+
+        sorted_entries = sorted(entries, key=lambda e: e.start_time)
+        gap = max(0.0, min_gap_seconds)
+        next_available = 0.0
+        normalized: list[AudioEntry] = []
+
+        for entry in sorted_entries:
+            start_time = max(entry.start_time, next_available)
+            duration = max(0.0, entry.duration_seconds)
+            normalized.append(
+                AudioEntry(
+                    audio_path=entry.audio_path,
+                    start_time=start_time,
+                    duration_seconds=duration,
+                )
+            )
+            next_available = start_time + duration + gap
+
+        return normalized
 
     def _mix_audio(self, video_path: str, entries: list[AudioEntry], out_wav: str) -> None:
         """元動画音声と実況音声を amix でミックスして WAV に出力する。"""

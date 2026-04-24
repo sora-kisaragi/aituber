@@ -29,6 +29,13 @@ class Settings(BaseSettings):
 
     segment_duration: int = 5
     event_grouping_window: int = 3
+    planner_min_silence_seconds: float = 2.0
+    planner_plan_duration_seconds: float = 3.0
+    planner_speak_threshold: float = 0.3
+    planner_max_talk_ratio: float = 0.5
+    planner_talk_window_seconds: float = 60.0
+    planner_max_queue_delay_seconds: float = 3.0
+    compose_overlap_min_gap_seconds: float = 0.0
 
     model_config = {"env_file": ".env"}
 
