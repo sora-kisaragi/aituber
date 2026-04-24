@@ -59,14 +59,16 @@ description: 現在のブランチの変更をコミット → push → PR 作�
    git push origin <current-branch>
    ```
 
-4. PR を作成する（関連 Issue があれば `Closes #XX` を含める）
+4. PR を作成する（関連 Issue があれば `Closes #XX` を含め、なければ `N/A` を明記する）
    ```powershell
    @'
    ## 概要
    <変更内容>
 
    ## 関連 Issue
-   Closes #<Issue番号>
+   <関連Issue行>
+   # 例1: Closes #<Issue番号>
+   # 例2: N/A（関連Issueなし）
 
    ## 確認事項
    - [ ] 正常系確認
