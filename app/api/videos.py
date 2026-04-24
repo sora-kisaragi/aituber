@@ -7,6 +7,7 @@ import subprocess
 import uuid
 import zipfile
 from pathlib import Path
+from typing import Any
 
 import cv2
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -26,7 +27,11 @@ from app.core.prompt import CommentaryService
 from app.core.rule_tagger import RuleTagger
 from app.core.segmentation import FrameExtractor, SegmentationService
 from app.core.subtitle import SubtitleService
-from app.core.tags import normalize_video_metadata
+from app.core.tags import (
+    build_tag_source_map,
+    mark_llm_tag_status_skipped,
+    normalize_video_metadata,
+)
 from app.core.vision import VisionService
 from app.db.session import get_db
 from app.models.models import (
@@ -39,7 +44,7 @@ from app.models.models import (
     UtterancePlan,
     Video,
 )
-from app.models.schemas import TimelineItem, VideoRead, VideoTimeline, VideoUpdate
+from app.models.schemas import TimelineItem, VideoRead, VideoTagRead, VideoTimeline, VideoUpdate
 from app.utils.logging import logger
 
 router = APIRouter()
@@ -141,6 +146,15 @@ def get_video(video_id: str, db: Session = Depends(get_db)) -> VideoRead:
     return _to_video_read(video)
 
 
+@router.get("/{video_id}/tags", response_model=VideoTagRead)
+def get_video_tags(video_id: str, db: Session = Depends(get_db)) -> VideoTagRead:
+    """動画タグ（manual/rule/llm/effective）とソース情報を返す。"""
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    return _to_video_tag_read(video.video_metadata)
+
+
 @router.patch("/{video_id}", response_model=VideoRead)
 def update_video(video_id: str, payload: VideoUpdate, db: Session = Depends(get_db)) -> VideoRead:
     """動画のタイトル・タグを更新する。"""
@@ -154,9 +168,10 @@ def update_video(video_id: str, payload: VideoUpdate, db: Session = Depends(get_
             raise HTTPException(status_code=400, detail="タイトルが空です")
         video.title = new_title
 
-    if payload.tags is not None:
+    manual_tags = payload.tags_manual if payload.tags_manual is not None else payload.tags
+    if manual_tags is not None:
         metadata = normalize_video_metadata(video.video_metadata)
-        metadata["tags_manual"] = _normalize_tags(payload.tags)
+        metadata["tags_manual"] = _normalize_tags(manual_tags)
         video.video_metadata = normalize_video_metadata(metadata)
 
     try:
@@ -169,6 +184,75 @@ def update_video(video_id: str, payload: VideoUpdate, db: Session = Depends(get_
         raise HTTPException(status_code=500, detail="動画更新に失敗しました") from e
 
     return _to_video_read(video)
+
+
+@router.post("/{video_id}/tags/rule:refresh", response_model=VideoTagRead)
+def refresh_video_rule_tags(video_id: str, db: Session = Depends(get_db)) -> VideoTagRead:
+    """RuleTagger で tags_auto_rule を再生成する。"""
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="動画が見つかりません")
+
+    cfg = get_runtime_settings(db)
+    metadata = _refresh_rule_tags(video, cfg)
+    video.video_metadata = metadata
+
+    try:
+        db.add(video)
+        db.commit()
+        db.refresh(video)
+    except Exception as e:
+        db.rollback()
+        logger.error("rule タグ再生成失敗: %s", e)
+        raise HTTPException(status_code=500, detail="rule タグ再生成に失敗しました") from e
+
+    return _to_video_tag_read(video.video_metadata)
+
+
+@router.post("/{video_id}/tags/llm:refresh", response_model=VideoTagRead)
+def refresh_video_llm_tags(video_id: str, db: Session = Depends(get_db)) -> VideoTagRead:
+    """LLM タグ再生成を実行する（現状は未実装のためスキップ）。"""
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="動画が見つかりません")
+
+    metadata = _refresh_llm_tags(video.video_metadata)
+    video.video_metadata = metadata
+
+    try:
+        db.add(video)
+        db.commit()
+        db.refresh(video)
+    except Exception as e:
+        db.rollback()
+        logger.error("llm タグ再生成失敗: %s", e)
+        raise HTTPException(status_code=500, detail="llm タグ再生成に失敗しました") from e
+
+    return _to_video_tag_read(video.video_metadata)
+
+
+@router.post("/{video_id}/tags/refresh", response_model=VideoTagRead)
+def refresh_video_tags(video_id: str, db: Session = Depends(get_db)) -> VideoTagRead:
+    """Rule/LLM のタグ再生成をまとめて実行する。"""
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="動画が見つかりません")
+
+    cfg = get_runtime_settings(db)
+    metadata = _refresh_rule_tags(video, cfg)
+    metadata = _refresh_llm_tags(metadata)
+    video.video_metadata = metadata
+
+    try:
+        db.add(video)
+        db.commit()
+        db.refresh(video)
+    except Exception as e:
+        db.rollback()
+        logger.error("タグ再生成失敗: %s", e)
+        raise HTTPException(status_code=500, detail="タグ再生成に失敗しました") from e
+
+    return _to_video_tag_read(video.video_metadata)
 
 
 @router.get("/{video_id}/timeline", response_model=VideoTimeline)
@@ -221,19 +305,7 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(status_code=404, detail="動画が見つかりません")
 
     cfg = get_runtime_settings(db)
-    rule_tagger = RuleTagger()
-    metadata = normalize_video_metadata(video.video_metadata)
-    metadata["tags_auto_rule"] = rule_tagger.generate(
-        tts_mode=cfg.tts_default_mode,
-        llm_model=cfg.llm_model_name,
-        vlm_model=cfg.vlm_model_name,
-        duration_seconds=video.duration_seconds,
-        fps=video.fps,
-    )
-    tag_status = dict(metadata.get("tag_status", {}))
-    tag_status["rule"] = "ready"
-    metadata["tag_status"] = tag_status
-    video.video_metadata = normalize_video_metadata(metadata)
+    video.video_metadata = _refresh_rule_tags(video, cfg)
     db.add(video)
     db.commit()
 
@@ -660,4 +732,41 @@ def _to_video_read(video: Video) -> VideoRead:
         storage_path=video.storage_path,
         video_metadata=metadata,
         created_at=video.created_at,
+    )
+
+
+def _refresh_rule_tags(video: Video, cfg: Any) -> dict[str, Any]:
+    """RuleTagger で自動タグを更新する。"""
+    rule_tagger = RuleTagger()
+    metadata = normalize_video_metadata(video.video_metadata)
+    metadata["tags_auto_rule"] = rule_tagger.generate(
+        tts_mode=cfg.tts_default_mode,
+        llm_model=cfg.llm_model_name,
+        vlm_model=cfg.vlm_model_name,
+        duration_seconds=video.duration_seconds,
+        fps=video.fps,
+    )
+    tag_status = dict(metadata.get("tag_status", {}))
+    tag_status["rule"] = "ready"
+    metadata["tag_status"] = tag_status
+    return normalize_video_metadata(metadata)
+
+
+def _refresh_llm_tags(raw_metadata: dict[str, Any] | None) -> dict[str, Any]:
+    """LLM タグ更新をスキップし、状態のみ更新する。"""
+    return mark_llm_tag_status_skipped(raw_metadata)
+
+
+def _to_video_tag_read(raw_metadata: dict[str, Any] | None) -> VideoTagRead:
+    """タグ情報の API レスポンスを構築する。"""
+    metadata = normalize_video_metadata(raw_metadata)
+    source_map = build_tag_source_map(metadata)
+    return VideoTagRead(
+        tags_manual=metadata["tags_manual"],
+        tags_auto_rule=metadata["tags_auto_rule"],
+        tags_auto_llm=metadata["tags_auto_llm"],
+        tags_suggested_llm=metadata["tags_suggested_llm"],
+        tags_effective=metadata["tags_effective"],
+        source_by_tag=source_map,
+        tag_status=metadata["tag_status"],
     )

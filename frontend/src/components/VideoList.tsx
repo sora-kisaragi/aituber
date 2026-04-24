@@ -1,7 +1,14 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { MEDIA_BASE } from '../api/client'
-import { deleteVideo, updateVideo, Video } from '../api/videos'
+import {
+  deleteVideo,
+  refreshVideoLlmTags,
+  refreshVideoRuleTags,
+  refreshVideoTags,
+  updateVideo,
+  Video,
+} from '../api/videos'
 
 interface Props {
   videos: Video[]
@@ -15,6 +22,7 @@ export default function VideoList({ videos, onChanged }: Props) {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [tagInput, setTagInput] = useState('')
   const [tagging, setTagging] = useState(false)
+  const [refreshingTagKey, setRefreshingTagKey] = useState<string | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameInput, setRenameInput] = useState('')
   const [renaming, setRenaming] = useState(false)
@@ -22,24 +30,45 @@ export default function VideoList({ videos, onChanged }: Props) {
     Record<string, boolean>
   >({})
 
+  const effectiveTags = (video: Video): string[] => {
+    if (Array.isArray(video.video_metadata?.tags_effective)) {
+      return video.video_metadata.tags_effective
+    }
+    if (Array.isArray(video.video_metadata?.tags)) {
+      return video.video_metadata.tags
+    }
+    return []
+  }
+
+  const manualTags = (video: Video): string[] => {
+    if (Array.isArray(video.video_metadata?.tags_manual)) {
+      return video.video_metadata.tags_manual
+    }
+    if (Array.isArray(video.video_metadata?.tags)) {
+      return video.video_metadata.tags
+    }
+    return []
+  }
+
+  const suggestedTags = (video: Video): string[] =>
+    Array.isArray(video.video_metadata?.tags_suggested_llm)
+      ? video.video_metadata.tags_suggested_llm
+      : []
+
   const allTags = Array.from(
-    new Set(
-      videos.flatMap((v) => (Array.isArray(v.video_metadata?.tags) ? v.video_metadata.tags : [])),
-    ),
+    new Set(videos.flatMap((v) => effectiveTags(v))),
   ).sort((a, b) => a.localeCompare(b, 'ja'))
 
-  const filtered = videos.filter((v) =>
-    {
-      const tags = Array.isArray(v.video_metadata?.tags) ? v.video_metadata.tags : []
-      const query = search.trim().toLowerCase()
-      const matchSearch =
-        query.length === 0 ||
-        v.title.toLowerCase().includes(query) ||
-        tags.some((t) => t.toLowerCase().includes(query))
-      const matchTag = tagFilter === 'all' || tags.includes(tagFilter)
-      return matchSearch && matchTag
-    },
-  )
+  const filtered = videos.filter((v) => {
+    const tags = effectiveTags(v)
+    const query = search.trim().toLowerCase()
+    const matchSearch =
+      query.length === 0 ||
+      v.title.toLowerCase().includes(query) ||
+      tags.some((t) => t.toLowerCase().includes(query))
+    const matchTag = tagFilter === 'all' || tags.includes(tagFilter)
+    return matchSearch && matchTag
+  })
   const filteredIds = filtered.map((v) => v.id)
   const allFilteredSelected =
     filteredIds.length > 0 && filteredIds.every((id) => selectedIds.has(id))
@@ -132,10 +161,8 @@ export default function VideoList({ videos, onChanged }: Props) {
       await Promise.all(
         targetIds.map(async (id) => {
           const video = videos.find((v) => v.id === id)
-          const current = Array.isArray(video?.video_metadata?.tags)
-            ? video!.video_metadata!.tags!
-            : []
-          await updateVideo(id, { tags: mergeTags(current, newTags) })
+          const current = video ? manualTags(video) : []
+          await updateVideo(id, { tags_manual: mergeTags(current, newTags) })
         }),
       )
       setTagInput('')
@@ -144,6 +171,49 @@ export default function VideoList({ videos, onChanged }: Props) {
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
       window.alert(`タグ更新に失敗しました: ${msg}`)
+    } finally {
+      setTagging(false)
+    }
+  }
+
+  const handleRefresh = async (
+    videoId: string,
+    mode: 'all' | 'rule' | 'llm',
+  ) => {
+    const key = `${videoId}:${mode}`
+    setRefreshingTagKey(key)
+    try {
+      if (mode === 'all') {
+        await refreshVideoTags(videoId)
+      } else if (mode === 'rule') {
+        await refreshVideoRuleTags(videoId)
+      } else {
+        await refreshVideoLlmTags(videoId)
+      }
+      onChanged()
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      window.alert(`タグ再生成に失敗しました: ${msg}`)
+    } finally {
+      setRefreshingTagKey(null)
+    }
+  }
+
+  const handleAcceptSuggested = async (video: Video) => {
+    const suggestions = suggestedTags(video)
+    if (suggestions.length === 0) {
+      window.alert('取り込み可能な候補タグがありません。')
+      return
+    }
+
+    setTagging(true)
+    try {
+      const mergedManual = mergeTags(manualTags(video), suggestions)
+      await updateVideo(video.id, { tags_manual: mergedManual })
+      onChanged()
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      window.alert(`候補タグ取り込みに失敗しました: ${msg}`)
     } finally {
       setTagging(false)
     }
@@ -269,21 +339,73 @@ export default function VideoList({ videos, onChanged }: Props) {
                     {v.created_at &&
                       ` · ${new Date(v.created_at).toLocaleString('ja-JP')}`}
                   </div>
-                  {Array.isArray(v.video_metadata?.tags) &&
-                    v.video_metadata.tags.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {v.video_metadata.tags.map((tag) => (
-                          <span
-                            key={`${v.id}-${tag}`}
-                            className="px-2 py-0.5 text-[10px] rounded-full bg-gray-100 text-gray-600"
-                          >
-                            {tag}
-                          </span>
-                        ))}
+                  {effectiveTags(v).length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {effectiveTags(v).map((tag) => (
+                        <span
+                          key={`${v.id}-effective-${tag}`}
+                          className="px-2 py-0.5 text-[10px] rounded-full bg-gray-100 text-gray-700"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {suggestedTags(v).length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {suggestedTags(v).map((tag) => (
+                        <span
+                          key={`${v.id}-suggested-${tag}`}
+                          className="px-2 py-0.5 text-[10px] rounded-full bg-amber-100 text-amber-700"
+                        >
+                          候補: {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {typeof v.video_metadata?.tag_status === 'object' &&
+                    typeof v.video_metadata?.tag_status?.llm_error === 'string' &&
+                    v.video_metadata.tag_status.llm_error && (
+                      <div className="text-[10px] text-amber-700 mt-1">
+                        {v.video_metadata.tag_status.llm_error}
                       </div>
                     )}
                 </div>
               </Link>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => handleRefresh(v.id, 'all')}
+                  disabled={refreshingTagKey === `${v.id}:all`}
+                  className="px-2 py-1 text-xs rounded border border-blue-200 text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+                >
+                  {refreshingTagKey === `${v.id}:all` ? '再生成中...' : 'タグ再生成'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleRefresh(v.id, 'rule')}
+                  disabled={refreshingTagKey === `${v.id}:rule`}
+                  className="px-2 py-1 text-xs rounded border border-sky-200 text-sky-700 hover:bg-sky-50 disabled:opacity-50"
+                >
+                  Rule
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleRefresh(v.id, 'llm')}
+                  disabled={refreshingTagKey === `${v.id}:llm`}
+                  className="px-2 py-1 text-xs rounded border border-violet-200 text-violet-700 hover:bg-violet-50 disabled:opacity-50"
+                >
+                  LLM
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAcceptSuggested(v)}
+                  disabled={tagging || suggestedTags(v).length === 0}
+                  className="px-2 py-1 text-xs rounded border border-amber-200 text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+                >
+                  候補採用
+                </button>
+              </div>
               {renamingId === v.id ? (
                 <div className="flex items-center gap-1">
                   <input

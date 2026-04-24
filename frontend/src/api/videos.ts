@@ -1,15 +1,29 @@
 import { api } from './client'
 
+export interface VideoTagStatus {
+  rule: string
+  llm: string
+  llm_error: string | null
+}
+
+export interface VideoMetadata {
+  tags?: string[]
+  tags_manual?: string[]
+  tags_auto_rule?: string[]
+  tags_auto_llm?: string[]
+  tags_suggested_llm?: string[]
+  tags_effective?: string[]
+  tag_status?: VideoTagStatus
+  [key: string]: unknown
+}
+
 export interface Video {
   id: string
   title: string
   duration_seconds: number | null
   fps: number | null
   storage_path: string
-  video_metadata: {
-    tags?: string[]
-    [key: string]: unknown
-  } | null
+  video_metadata: VideoMetadata | null
   created_at: string | null
 }
 
@@ -30,6 +44,7 @@ export async function deleteVideo(id: string): Promise<void> {
 export interface VideoUpdatePayload {
   title?: string
   tags?: string[]
+  tags_manual?: string[]
 }
 
 export async function updateVideo(
@@ -85,5 +100,35 @@ export interface VideoTimeline {
 
 export async function getTimeline(id: string): Promise<VideoTimeline> {
   const { data } = await api.get<VideoTimeline>(`/videos/${id}/timeline`)
+  return data
+}
+
+export interface VideoTagInfo {
+  tags_manual: string[]
+  tags_auto_rule: string[]
+  tags_auto_llm: string[]
+  tags_suggested_llm: string[]
+  tags_effective: string[]
+  source_by_tag: Record<string, string>
+  tag_status: VideoTagStatus
+}
+
+export async function getVideoTags(id: string): Promise<VideoTagInfo> {
+  const { data } = await api.get<VideoTagInfo>(`/videos/${id}/tags`)
+  return data
+}
+
+export async function refreshVideoTags(id: string): Promise<VideoTagInfo> {
+  const { data } = await api.post<VideoTagInfo>(`/videos/${id}/tags/refresh`)
+  return data
+}
+
+export async function refreshVideoRuleTags(id: string): Promise<VideoTagInfo> {
+  const { data } = await api.post<VideoTagInfo>(`/videos/${id}/tags/rule:refresh`)
+  return data
+}
+
+export async function refreshVideoLlmTags(id: string): Promise<VideoTagInfo> {
+  const { data } = await api.post<VideoTagInfo>(`/videos/${id}/tags/llm:refresh`)
   return data
 }
