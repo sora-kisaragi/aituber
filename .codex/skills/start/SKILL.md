@@ -47,7 +47,16 @@ description: 作業開始時に GitHub Issues を確認し、ブランチ作成�
 
 6. Issue に作業開始コメントを残す
    ```bash
-   gh issue comment <番号> --body "作業開始します。ブランチ: \`<ブランチ名>\`"
+   tmp_file=$(mktemp)
+   cat <<EOF > "$tmp_file"
+   作業開始します。ブランチ: <ブランチ名>
+
+   今回の実装方針:
+   - <方針1>
+   - <方針2>
+   EOF
+   gh issue comment <番号> --body-file "$tmp_file"
+   rm -f "$tmp_file"
    ```
 
 ## 運用ルール（完了時）
