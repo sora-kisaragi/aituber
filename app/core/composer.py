@@ -45,13 +45,16 @@ class Composer:
 
         if srt_path and Path(srt_path).exists():
             self._burn_subtitles(
-                source, srt_path, output_path,
+                source,
+                srt_path,
+                output_path,
                 has_separate_audio=bool(audio_entries),
                 video_path=video_path,
             )
         else:
             self._copy_video(
-                source, output_path,
+                source,
+                output_path,
                 has_separate_audio=bool(audio_entries),
                 video_path=video_path,
             )
@@ -118,8 +121,7 @@ class Composer:
         )
 
     def _burn_subtitles(
-        self, source: str, srt_path: str, output: str, *,
-        has_separate_audio: bool, video_path: str
+        self, source: str, srt_path: str, output: str, *, has_separate_audio: bool, video_path: str
     ) -> None:
         srt_escaped = srt_path.replace("\\", "/").replace(":", "\\:")
         subtitle_filter = (
@@ -131,14 +133,22 @@ class Composer:
             # 入力0: 元動画（映像）、入力1: ミックス済み音声 WAV
             subprocess.run(
                 [
-                    "ffmpeg", "-y",
-                    "-i", video_path,
-                    "-i", source,
-                    "-map", "0:v",
-                    "-map", "1:a",
-                    "-vf", subtitle_filter,
-                    "-c:v", "libx264",
-                    "-c:a", "aac",
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    video_path,
+                    "-i",
+                    source,
+                    "-map",
+                    "0:v",
+                    "-map",
+                    "1:a",
+                    "-vf",
+                    subtitle_filter,
+                    "-c:v",
+                    "libx264",
+                    "-c:a",
+                    "aac",
                     output,
                 ],
                 capture_output=True,
@@ -147,11 +157,16 @@ class Composer:
         else:
             subprocess.run(
                 [
-                    "ffmpeg", "-y",
-                    "-i", source,
-                    "-vf", subtitle_filter,
-                    "-c:v", "libx264",
-                    "-c:a", "copy",
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    source,
+                    "-vf",
+                    subtitle_filter,
+                    "-c:v",
+                    "libx264",
+                    "-c:a",
+                    "copy",
                     output,
                 ],
                 capture_output=True,
@@ -170,13 +185,20 @@ class Composer:
             # 入力0: 元動画（映像）、入力1: ミックス済み音声 WAV
             subprocess.run(
                 [
-                    "ffmpeg", "-y",
-                    "-i", video_path,
-                    "-i", source,
-                    "-map", "0:v",
-                    "-map", "1:a",
-                    "-c:v", "copy",
-                    "-c:a", "aac",
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    video_path,
+                    "-i",
+                    source,
+                    "-map",
+                    "0:v",
+                    "-map",
+                    "1:a",
+                    "-c:v",
+                    "copy",
+                    "-c:a",
+                    "aac",
                     output,
                 ],
                 capture_output=True,
