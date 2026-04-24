@@ -23,6 +23,7 @@ from app.core.exo_generator import ExoConfig, ExoEntry, ExoGenerator
 from app.core.planning import UtterancePlanner
 from app.core.progress_store import update_progress
 from app.core.prompt import CommentaryService
+from app.core.rule_tagger import RuleTagger
 from app.core.segmentation import FrameExtractor, SegmentationService
 from app.core.subtitle import SubtitleService
 from app.core.tags import normalize_video_metadata
@@ -218,9 +219,23 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
     video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
         raise HTTPException(status_code=404, detail="動画が見つかりません")
-    video.video_metadata = normalize_video_metadata(video.video_metadata)
 
     cfg = get_runtime_settings(db)
+    rule_tagger = RuleTagger()
+    metadata = normalize_video_metadata(video.video_metadata)
+    metadata["tags_auto_rule"] = rule_tagger.generate(
+        tts_mode=cfg.tts_default_mode,
+        llm_model=cfg.llm_model_name,
+        vlm_model=cfg.vlm_model_name,
+        duration_seconds=video.duration_seconds,
+        fps=video.fps,
+    )
+    tag_status = dict(metadata.get("tag_status", {}))
+    tag_status["rule"] = "ready"
+    metadata["tag_status"] = tag_status
+    video.video_metadata = normalize_video_metadata(metadata)
+    db.add(video)
+    db.commit()
 
     seg_service = SegmentationService(
         segment_duration=cfg.segment_duration,
