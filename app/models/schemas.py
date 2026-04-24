@@ -26,6 +26,17 @@ class VideoRead(BaseModel):
 class VideoUpdate(BaseModel):
     title: str | None = None
     tags: list[str] | None = None
+    tags_manual: list[str] | None = None
+
+
+class VideoTagRead(BaseModel):
+    tags_manual: list[str]
+    tags_auto_rule: list[str]
+    tags_auto_llm: list[str]
+    tags_suggested_llm: list[str]
+    tags_effective: list[str]
+    source_by_tag: dict[str, str]
+    tag_status: dict[str, str | None]
 
 
 class SegmentRead(BaseModel):

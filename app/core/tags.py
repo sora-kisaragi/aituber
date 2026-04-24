@@ -123,3 +123,31 @@ def _tag_family(tag: str) -> str:
     if len(parts) == 2:
         return parts[0]
     return ":".join(parts[:-1])
+
+
+def build_tag_source_map(metadata: dict[str, Any]) -> dict[str, str]:
+    """タグがどのソース由来かを返す。"""
+    normalized = normalize_video_metadata(metadata)
+    source_map: dict[str, str] = {}
+    for tag in normalized.get("tags_auto_llm", []):
+        source_map[tag] = "llm"
+    for tag in normalized.get("tags_auto_rule", []):
+        source_map[tag] = "rule"
+    for tag in normalized.get("tags_manual", []):
+        source_map[tag] = "manual"
+    for tag in normalized.get("tags_suggested_llm", []):
+        source_map.setdefault(tag, "llm_suggested")
+    return source_map
+
+
+def mark_llm_tag_status_skipped(
+    metadata: dict[str, Any] | None,
+    error_message: str = "LLMTagger 未実装のためスキップしました",
+) -> dict[str, Any]:
+    """LLM タグ更新をスキップ扱いにして状態を返す。"""
+    normalized = normalize_video_metadata(metadata)
+    tag_status = dict(normalized.get("tag_status", {}))
+    tag_status["llm"] = "skipped"
+    tag_status["llm_error"] = error_message
+    normalized["tag_status"] = tag_status
+    return normalize_video_metadata(normalized)
