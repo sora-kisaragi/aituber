@@ -1,3 +1,5 @@
+"""Alembic 実行環境設定。"""
+
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
@@ -19,6 +21,14 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
+    """オフラインモード（SQL出力）でマイグレーションを実行する。
+
+    Args:
+        なし。
+
+    Returns:
+        なし。マイグレーション SQL を生成して実行コンテキストへ渡す。
+    """
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
@@ -31,6 +41,14 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    """オンラインモード（DB接続あり）でマイグレーションを実行する。
+
+    Args:
+        なし。
+
+    Returns:
+        なし。DB 接続を張ってマイグレーションを適用する。
+    """
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",

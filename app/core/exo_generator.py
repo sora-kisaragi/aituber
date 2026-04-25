@@ -26,6 +26,8 @@ class ExoEntry:
 
 @dataclass
 class ExoConfig:
+    """AviUtl 拡張編集ファイル生成時の設定。"""
+
     width: int = 1920
     height: int = 1080
     fps: float = 30.0
@@ -46,7 +48,16 @@ class ExoGenerator:
         entries: list[ExoEntry],
         config: ExoConfig,
     ) -> bytes:
-        """exo ファイルの内容を Shift-JIS バイト列で返す。"""
+        """exo ファイルの内容を Shift-JIS バイト列で返す。
+
+        Args:
+            video_file: 元動画ファイルの相対パス。
+            entries: 実況音声・字幕の配置情報配列。
+            config: 出力レイアウト設定。
+
+        Returns:
+            Shift-JIS でエンコードした `.exo` バイト列。
+        """
         fps = config.fps
         total_frames = max(1, math.ceil(config.total_duration * fps))
         rate, scale = self._fps_fraction(fps)
@@ -100,6 +111,7 @@ class ExoGenerator:
         audio_rate: int,
         audio_ch: int,
     ) -> str:
+        """`[exedit]` ヘッダーブロック文字列を生成する。"""
         return "\r\n".join(
             [
                 "[exedit]",
@@ -114,6 +126,7 @@ class ExoGenerator:
         )
 
     def _video_block(self, idx: int, start: int, end: int, layer: int, file: str) -> str:
+        """元動画オブジェクトブロックを生成する。"""
         return "\r\n".join(
             [
                 f"[{idx}]",
@@ -134,6 +147,7 @@ class ExoGenerator:
         )
 
     def _audio_block(self, idx: int, start: int, end: int, layer: int, file: str) -> str:
+        """音声オブジェクトブロックを生成する。"""
         return "\r\n".join(
             [
                 f"[{idx}]",
@@ -161,6 +175,7 @@ class ExoGenerator:
         text: str,
         config: ExoConfig,
     ) -> str:
+        """字幕テキストオブジェクトブロックを生成する。"""
         return "\r\n".join(
             [
                 f"[{idx}]",
@@ -197,13 +212,29 @@ class ExoGenerator:
     # ── ユーティリティ ──────────────────────────────────────────────────────
 
     def _frames(self, start_time: float, duration: float, fps: float) -> tuple[int, int]:
-        """開始・終了フレーム番号（1-indexed）を返す。"""
+        """開始・終了フレーム番号（1-indexed）を返す。
+
+        Args:
+            start_time: 開始時刻（秒）。
+            duration: 継続時間（秒）。
+            fps: フレームレート。
+
+        Returns:
+            `(start_frame, end_frame)` のタプル。
+        """
         sf = max(1, round(start_time * fps))
         ef = max(sf, round((start_time + duration) * fps))
         return sf, ef
 
     def _fps_fraction(self, fps: float) -> tuple[int, int]:
-        """fps を (rate, scale) の整数比で返す。"""
+        """fps を (rate, scale) の整数比で返す。
+
+        Args:
+            fps: フレームレート。
+
+        Returns:
+            AviUtl が扱う `(rate, scale)` 形式の整数比。
+        """
         common = {29.97: (30000, 1001), 23.976: (24000, 1001), 59.94: (60000, 1001)}
         for f, (r, s) in common.items():
             if abs(fps - f) < 0.01:
@@ -211,7 +242,14 @@ class ExoGenerator:
         return round(fps), 1
 
     def _encode_text(self, text: str) -> str:
-        """テキストを UTF-16LE hex 文字列に変換する（4096 文字固定長、末尾ゼロ埋め）。"""
+        """テキストを UTF-16LE hex 文字列に変換する（4096 文字固定長、末尾ゼロ埋め）。
+
+        Args:
+            text: 字幕テキスト。
+
+        Returns:
+            AviUtl テキストオブジェクト用の UTF-16LE 16進文字列。
+        """
         encoded = text.encode("utf-16-le")
         hex_str = encoded.hex().upper()
         return hex_str.ljust(4096, "0")

@@ -54,6 +54,8 @@ export default function VideoList({ videos, onChanged }: Props) {
     Array.isArray(video.video_metadata?.tags_suggested_llm)
       ? video.video_metadata.tags_suggested_llm
       : []
+  const isSystemTag = (tag: string): boolean =>
+    tag.startsWith('cfg:') || tag.startsWith('video:')
 
   const allTags = Array.from(
     new Set(videos.flatMap((v) => effectiveTags(v))),
@@ -341,14 +343,26 @@ export default function VideoList({ videos, onChanged }: Props) {
                   </div>
                   {effectiveTags(v).length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-1">
-                      {effectiveTags(v).map((tag) => (
+                      {effectiveTags(v)
+                        .filter((tag) => !isSystemTag(tag))
+                        .map((tag) => (
+                          <span
+                            key={`${v.id}-effective-content-${tag}`}
+                            className="px-2 py-0.5 text-[10px] rounded-full bg-blue-50 text-blue-700 border border-blue-100"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      {effectiveTags(v)
+                        .filter((tag) => isSystemTag(tag))
+                        .map((tag) => (
                         <span
-                          key={`${v.id}-effective-${tag}`}
-                          className="px-2 py-0.5 text-[10px] rounded-full bg-gray-100 text-gray-700"
+                          key={`${v.id}-effective-system-${tag}`}
+                          className="px-2 py-0.5 text-[10px] rounded-full bg-gray-100 text-gray-700 border border-gray-200"
                         >
-                          {tag}
+                          SYS: {tag}
                         </span>
-                      ))}
+                        ))}
                     </div>
                   )}
                   {suggestedTags(v).length > 0 && (

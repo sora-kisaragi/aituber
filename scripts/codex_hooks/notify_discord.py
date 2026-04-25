@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Codex Hook から Discord Webhook 通知を送信するCLI。"""
+
 from __future__ import annotations
 
 import argparse
@@ -12,6 +14,14 @@ from datetime import UTC, datetime
 
 
 def parse_args() -> argparse.Namespace:
+    """CLI 引数を解析する。
+
+    Args:
+        なし。
+
+    Returns:
+        通知パラメータを保持した名前空間。
+    """
     parser = argparse.ArgumentParser(description="Codex hook 用 Discord 通知")
     parser.add_argument(
         "--event",
@@ -28,6 +38,14 @@ def parse_args() -> argparse.Namespace:
 
 
 def current_branch() -> str:
+    """現在の Git ブランチ名を取得する。
+
+    Args:
+        なし。
+
+    Returns:
+        ブランチ名。取得失敗時は空文字。
+    """
     try:
         result = subprocess.run(
             ["git", "branch", "--show-current"],
@@ -47,6 +65,18 @@ def build_payload(
     issue: str,
     branch: str,
 ) -> dict[str, str]:
+    """Discord 投稿用 payload を構築する。
+
+    Args:
+        event: 通知イベント種別。
+        title: 通知タイトル。
+        body: 通知本文。
+        issue: 関連 Issue 番号。
+        branch: 関連ブランチ名。
+
+    Returns:
+        Discord Webhook の `content` を含む辞書。
+    """
     emoji_map = {
         "start": "🚀",
         "checkpoint": "📍",
@@ -70,6 +100,15 @@ def build_payload(
 
 
 def send_discord(webhook_url: str, payload: dict[str, str]) -> None:
+    """Discord Webhook へ通知を送信する。
+
+    Args:
+        webhook_url: 送信先 Discord Webhook URL。
+        payload: 投稿内容。
+
+    Returns:
+        なし。成功時は副作用として通知を送信する。
+    """
     req = urllib.request.Request(
         webhook_url,
         data=json.dumps(payload).encode("utf-8"),
@@ -85,6 +124,14 @@ def send_discord(webhook_url: str, payload: dict[str, str]) -> None:
 
 
 def main() -> int:
+    """通知CLIのメイン処理を実行する。
+
+    Args:
+        なし。
+
+    Returns:
+        終了コード（0: 成功または非strictスキップ, 1: strict失敗）。
+    """
     args = parse_args()
     webhook = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
     if not webhook:

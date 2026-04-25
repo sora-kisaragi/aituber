@@ -1,3 +1,5 @@
+"""動画管理・パイプライン実行関連の API エンドポイントを提供する。"""
+
 from __future__ import annotations
 
 import csv
@@ -47,6 +49,7 @@ from app.models.models import (
 from app.models.schemas import TimelineItem, VideoRead, VideoTagRead, VideoTimeline, VideoUpdate
 from app.utils.logging import logger
 from app.utils.pipeline_debug import PipelineDebugRecorder
+from app.utils.pipeline_performance import PipelinePerformanceRecorder
 from app.utils.pipeline_state import PipelineSegmentStateStore
 
 router = APIRouter()
@@ -68,7 +71,16 @@ def upload_video(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ) -> VideoRead:
-    """動画ファイルをアップロードして DB に登録する。"""
+    """動画ファイルをアップロードして DB に登録する。
+
+    Args:
+        title: 明示指定された動画タイトル。空文字の場合はファイル名を代替で使用する。
+        file: クライアントから受け取る動画ファイル本体。
+        db: 動画レコードの保存に使う DB セッション。
+
+    Returns:
+        登録した動画のメタ情報を含むレスポンス。
+    """
     video_id = uuid.uuid4()
     media_dir = Path(settings.media_root) / str(video_id)
     media_dir.mkdir(parents=True, exist_ok=True)
@@ -109,16 +121,30 @@ def upload_video(
 
 @router.get("/", response_model=list[VideoRead])
 def list_videos(db: Session = Depends(get_db)) -> list[VideoRead]:
+    """登録済み動画一覧を作成日時の降順で返す。
+
+    Args:
+        db: 動画一覧を取得する DB セッション。
+
+    Returns:
+        新しい順に並んだ動画一覧。
+    """
     videos = db.query(Video).order_by(Video.created_at.desc()).all()
     return [_to_video_read(video) for video in videos]
 
 
 @router.delete("/{video_id}")
 def delete_video(video_id: str, db: Session = Depends(get_db)) -> dict:
-    """動画レコードと関連メディアを削除する。"""
-    video = db.query(Video).filter(Video.id == video_id).first()
-    if not video:
-        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    """動画レコードと関連メディアを削除する。
+
+    Args:
+        video_id: 削除対象動画の ID。
+        db: レコード削除に使用する DB セッション。
+
+    Returns:
+        削除結果 (`status`, `video_id`) を含む辞書。
+    """
+    video = _get_video_or_404(db, video_id)
 
     media_dir = Path(settings.media_root) / str(video.id)
     try:
@@ -142,27 +168,47 @@ def delete_video(video_id: str, db: Session = Depends(get_db)) -> dict:
 
 @router.get("/{video_id}", response_model=VideoRead)
 def get_video(video_id: str, db: Session = Depends(get_db)) -> VideoRead:
-    video = db.query(Video).filter(Video.id == video_id).first()
-    if not video:
-        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    """動画IDを指定して動画詳細を返す。
+
+    Args:
+        video_id: 取得対象動画の ID。
+        db: 動画情報を取得する DB セッション。
+
+    Returns:
+        対象動画の詳細情報。
+    """
+    video = _get_video_or_404(db, video_id)
     return _to_video_read(video)
 
 
 @router.get("/{video_id}/tags", response_model=VideoTagRead)
 def get_video_tags(video_id: str, db: Session = Depends(get_db)) -> VideoTagRead:
-    """動画タグ（manual/rule/llm/effective）とソース情報を返す。"""
-    video = db.query(Video).filter(Video.id == video_id).first()
-    if not video:
-        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    """動画タグ（manual/rule/llm/effective）とソース情報を返す。
+
+    Args:
+        video_id: タグを取得する動画の ID。
+        db: 動画レコード参照に使う DB セッション。
+
+    Returns:
+        手動タグ・自動タグ・有効タグとタグソースをまとめたレスポンス。
+    """
+    video = _get_video_or_404(db, video_id)
     return _to_video_tag_read(video.video_metadata)
 
 
 @router.patch("/{video_id}", response_model=VideoRead)
 def update_video(video_id: str, payload: VideoUpdate, db: Session = Depends(get_db)) -> VideoRead:
-    """動画のタイトル・タグを更新する。"""
-    video = db.query(Video).filter(Video.id == video_id).first()
-    if not video:
-        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    """動画のタイトル・タグを更新する。
+
+    Args:
+        video_id: 更新対象動画の ID。
+        payload: 更新内容。タイトルと手動タグの更新を受け付ける。
+        db: 更新処理に利用する DB セッション。
+
+    Returns:
+        更新後の動画情報。
+    """
+    video = _get_video_or_404(db, video_id)
 
     if payload.title is not None:
         new_title = payload.title.strip()
@@ -190,10 +236,16 @@ def update_video(video_id: str, payload: VideoUpdate, db: Session = Depends(get_
 
 @router.post("/{video_id}/tags/rule:refresh", response_model=VideoTagRead)
 def refresh_video_rule_tags(video_id: str, db: Session = Depends(get_db)) -> VideoTagRead:
-    """RuleTagger で tags_auto_rule を再生成する。"""
-    video = db.query(Video).filter(Video.id == video_id).first()
-    if not video:
-        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    """RuleTagger で tags_auto_rule を再生成する。
+
+    Args:
+        video_id: ルールベースタグを更新する動画の ID。
+        db: 動画取得・保存に利用する DB セッション。
+
+    Returns:
+        更新後タグ情報。
+    """
+    video = _get_video_or_404(db, video_id)
 
     cfg = get_runtime_settings(db)
     metadata = _refresh_rule_tags(video, cfg)
@@ -213,10 +265,16 @@ def refresh_video_rule_tags(video_id: str, db: Session = Depends(get_db)) -> Vid
 
 @router.post("/{video_id}/tags/llm:refresh", response_model=VideoTagRead)
 def refresh_video_llm_tags(video_id: str, db: Session = Depends(get_db)) -> VideoTagRead:
-    """LLM タグを再生成する。"""
-    video = db.query(Video).filter(Video.id == video_id).first()
-    if not video:
-        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    """LLM タグを再生成する。
+
+    Args:
+        video_id: LLM タグを更新する動画の ID。
+        db: 動画取得・保存に利用する DB セッション。
+
+    Returns:
+        更新後タグ情報。
+    """
+    video = _get_video_or_404(db, video_id)
 
     cfg = get_runtime_settings(db)
     llm_client = LLMClient(
@@ -246,10 +304,16 @@ def refresh_video_llm_tags(video_id: str, db: Session = Depends(get_db)) -> Vide
 
 @router.post("/{video_id}/tags/refresh", response_model=VideoTagRead)
 def refresh_video_tags(video_id: str, db: Session = Depends(get_db)) -> VideoTagRead:
-    """Rule/LLM のタグ再生成をまとめて実行する。"""
-    video = db.query(Video).filter(Video.id == video_id).first()
-    if not video:
-        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    """Rule/LLM のタグ再生成をまとめて実行する。
+
+    Args:
+        video_id: タグ再生成対象動画の ID。
+        db: タグ更新結果を保存する DB セッション。
+
+    Returns:
+        ルール・LLM 両方の更新を反映したタグ情報。
+    """
+    video = _get_video_or_404(db, video_id)
 
     cfg = get_runtime_settings(db)
     llm_client = LLMClient(
@@ -280,10 +344,16 @@ def refresh_video_tags(video_id: str, db: Session = Depends(get_db)) -> VideoTag
 
 @router.get("/{video_id}/timeline", response_model=VideoTimeline)
 def get_timeline(video_id: str, db: Session = Depends(get_db)) -> VideoTimeline:
-    """動画の発話計画・実況テキスト・音声パスを一覧で返す。"""
-    video = db.query(Video).filter(Video.id == video_id).first()
-    if not video:
-        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    """動画の発話計画・実況テキスト・音声パスを一覧で返す。
+
+    Args:
+        video_id: タイムラインを取得する動画の ID。
+        db: 発話計画と実況データを参照する DB セッション。
+
+    Returns:
+        入力動画相対パスと実況タイムライン項目の集合。
+    """
+    video = _get_video_or_404(db, video_id)
 
     storage = Path(video.storage_path)
     media_root = Path(settings.media_root)
@@ -294,7 +364,7 @@ def get_timeline(video_id: str, db: Session = Depends(get_db)) -> VideoTimeline:
 
     plans = (
         db.query(UtterancePlan)
-        .filter(UtterancePlan.video_id == video_id)
+        .filter(UtterancePlan.video_id == video.id)
         .order_by(UtterancePlan.start_time)
         .all()
     )
@@ -326,13 +396,26 @@ def process_video(
     rerun_failed_only: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> dict:
-    """動画を分割 → フレーム抽出 → イベント検出 → 発話計画 → 実況生成まで実行する。"""
-    video = db.query(Video).filter(Video.id == video_id).first()
-    if not video:
-        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    """動画を分割 → フレーム抽出 → イベント検出 → 発話計画 → 実況生成まで実行する。
+
+    Args:
+        video_id: 処理対象動画の ID。
+        rerun_failed_only: `True` の場合は前回失敗したセグメントのみ再処理する。
+        db: 各ステップ結果を読み書きする DB セッション。
+
+    Returns:
+        実行結果サマリー。処理済み/再利用/失敗セグメント番号を含む。
+    """
+    video = _get_video_or_404(db, video_id)
+    current_video_id = str(video.id)
 
     cfg = get_runtime_settings(db)
     debug_recorder = PipelineDebugRecorder(cfg.media_root, str(video.id))
+    perf_recorder = PipelinePerformanceRecorder(cfg.media_root, str(video.id))
+    perf_recorder.checkpoint(
+        "process_started",
+        payload={"video_id": current_video_id, "rerun_failed_only": rerun_failed_only},
+    )
     state_store = PipelineSegmentStateStore(cfg.media_root, str(video.id))
     llm_client = LLMClient(
         base_url=cfg.llm_api_base,
@@ -359,6 +442,10 @@ def process_video(
         },
         output_data={"video_metadata": metadata},
     )
+    perf_recorder.checkpoint(
+        "tag_refresh_done",
+        payload={"tag_status": metadata.get("tag_status", {})},
+    )
 
     seg_service = SegmentationService(
         segment_duration=cfg.segment_duration,
@@ -381,15 +468,19 @@ def process_video(
         max_queue_delay_seconds=cfg.planner_max_queue_delay_seconds,
     )
     commentary_service = CommentaryService()
-    update_progress(video_id, "segmentation", 0, "動画を分割中...")
+    update_progress(current_video_id, "segmentation", 0, "動画を分割中...")
     try:
         seg_results = seg_service.execute(video.storage_path, str(video.id))
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode(errors="replace") if e.stderr else ""
         logger.error("FFmpeg 分割失敗: %s", stderr)
+        perf_recorder.finalize(
+            {"status": "error", "stage": "segmentation", "error": f"ffmpeg: {stderr[:200]}"}
+        )
         raise HTTPException(status_code=500, detail=f"FFmpeg エラー: {stderr[:500]}") from e
     except Exception as e:
         logger.error("process エラー: %s", e)
+        perf_recorder.finalize({"status": "error", "stage": "segmentation", "error": str(e)})
         raise HTTPException(status_code=500, detail=str(e)) from e
 
     state_store.sync_segments(seg_results)
@@ -424,7 +515,13 @@ def process_video(
             ],
         },
     )
-    update_progress(video_id, "segmentation", 10, f"分割完了: {len(seg_results)} セグメント")
+    perf_recorder.checkpoint(
+        "segmentation_done",
+        payload={"segment_count": len(seg_results)},
+    )
+    update_progress(
+        current_video_id, "segmentation", 10, f"分割完了: {len(seg_results)} セグメント"
+    )
 
     if not rerun_failed_only:
         removed_segments = (
@@ -438,7 +535,7 @@ def process_video(
         db.commit()
         logger.info(
             "既存処理結果を初期化: video_id=%s removed_segments=%d removed_plans=%d",
-            video_id,
+            current_video_id,
             removed_segments,
             removed_plans,
         )
@@ -453,7 +550,7 @@ def process_video(
     for seg_idx, seg_result in enumerate(seg_results):
         logger.debug(
             "segment処理開始: video_id=%s index=%d/%d range=%.2f-%.2f",
-            video_id,
+            current_video_id,
             seg_idx + 1,
             seg_count,
             seg_result.start_time,
@@ -510,7 +607,7 @@ def process_video(
         if rerun_failed_only and not should_reprocess and existing_segment is None:
             logger.info(
                 "再利用対象セグメントの既存データがないため再処理へ切替: video_id=%s index=%d",
-                video_id,
+                current_video_id,
                 seg_idx,
             )
 
@@ -598,7 +695,10 @@ def process_video(
 
                 pct = 10 + int((seg_idx + 1) / seg_count * 60)
                 update_progress(
-                    video_id, "vision", pct, f"フレーム解析中: {seg_idx + 1}/{seg_count}"
+                    current_video_id,
+                    "vision",
+                    pct,
+                    f"フレーム解析中: {seg_idx + 1}/{seg_count}",
                 )
 
                 event_results = event_service.generate(
@@ -661,7 +761,7 @@ def process_video(
             )
             logger.debug(
                 "segment処理完了: video_id=%s segment_id=%s frames=%d events=%d",
-                video_id,
+                current_video_id,
                 segment.id,
                 len(frame_results),
                 len(event_results),
@@ -669,7 +769,7 @@ def process_video(
         except Exception as e:
             logger.error(
                 "segment処理失敗: video_id=%s index=%d error=%s",
-                video_id,
+                current_video_id,
                 seg_idx,
                 e,
             )
@@ -697,14 +797,14 @@ def process_video(
     db.commit()
     logger.info(
         "発話計画再生成のため既存 plan を削除: video_id=%s removed_plans=%d",
-        video_id,
+        current_video_id,
         removed_plans_for_rebuild,
     )
 
     if failed_segment_indexes:
         logger.warning(
             "segment処理で失敗を検知: video_id=%s failed_indexes=%s",
-            video_id,
+            current_video_id,
             sorted(failed_segment_indexes),
         )
 
@@ -722,7 +822,16 @@ def process_video(
             "segments": segment_debug_summaries,
         },
     )
-    update_progress(video_id, "planning", 75, "発話計画を生成中...")
+    perf_recorder.checkpoint(
+        "segment_pipeline_done",
+        payload={
+            "processed_count": len(processed_segment_indexes),
+            "reused_count": len(reused_segment_indexes),
+            "failed_count": len(failed_segment_indexes),
+            "event_count": len(all_events),
+        },
+    )
+    update_progress(current_video_id, "planning", 75, "発話計画を生成中...")
 
     plan_results = planner.plan(str(video.id), all_events)
     debug_recorder.save_step_io(
@@ -743,7 +852,11 @@ def process_video(
             ],
         },
     )
-    update_progress(video_id, "planning", 80, f"発話計画完了: {len(plan_results)} 件")
+    perf_recorder.checkpoint(
+        "planning_done",
+        payload={"plan_count": len(plan_results)},
+    )
+    update_progress(current_video_id, "planning", 80, f"発話計画完了: {len(plan_results)} 件")
     prev_text = ""
     plan_count = len(plan_results)
     commentary_debug_rows: list[dict[str, Any]] = []
@@ -781,7 +894,12 @@ def process_video(
         )
         if plan_count > 0:
             pct = 80 + int((plan_idx + 1) / plan_count * 15)
-            update_progress(video_id, "commentary", pct, f"実況生成中: {plan_idx + 1}/{plan_count}")
+            update_progress(
+                current_video_id,
+                "commentary",
+                pct,
+                f"実況生成中: {plan_idx + 1}/{plan_count}",
+            )
         prev_text = com_data["text"]
 
     db.commit()
@@ -793,15 +911,32 @@ def process_video(
             "commentaries": commentary_debug_rows,
         },
     )
-    update_progress(video_id, "done", 100, "処理完了")
+    perf_recorder.finalize(
+        {
+            "status": "ok",
+            "video_id": current_video_id,
+            "segment_count": len(seg_results),
+            "event_count": len(all_events),
+            "plan_count": len(plan_results),
+            "processed_count": len(processed_segment_indexes),
+            "reused_count": len(reused_segment_indexes),
+            "failed_count": len(failed_segment_indexes),
+            "rerun_failed_only": rerun_failed_only,
+        }
+    )
+    update_progress(current_video_id, "done", 100, "処理完了")
+    performance_log_path = str(
+        Path(cfg.media_root) / current_video_id / "debug" / "performance.json"
+    )
     result = {
         "status": "ok",
-        "video_id": video_id,
+        "video_id": current_video_id,
         "plans": len(plan_results),
         "rerun_failed_only": rerun_failed_only,
         "processed_segments": sorted(processed_segment_indexes),
         "reused_segments": sorted(reused_segment_indexes),
         "failed_segments": sorted(failed_segment_indexes),
+        "performance_log_path": performance_log_path,
     }
     debug_recorder.save_step_io(
         "process_result",
@@ -813,10 +948,17 @@ def process_video(
 
 @router.post("/{video_id}/compose")
 def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
-    """実況音声・字幕を合成して最終動画を出力する。"""
-    video = db.query(Video).filter(Video.id == video_id).first()
-    if not video:
-        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    """実況音声・字幕を合成して最終動画を出力する。
+
+    Args:
+        video_id: 合成対象動画の ID。
+        db: 発話計画・実況・音声・字幕を参照/保存する DB セッション。
+
+    Returns:
+        出力動画のパスを含む結果辞書。
+    """
+    video = _get_video_or_404(db, video_id)
+    current_video_id = str(video.id)
 
     cfg = get_runtime_settings(db)
     debug_recorder = PipelineDebugRecorder(cfg.media_root, str(video.id))
@@ -833,7 +975,7 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
 
     plans = (
         db.query(UtterancePlan)
-        .filter(UtterancePlan.video_id == video_id)
+        .filter(UtterancePlan.video_id == video.id)
         .order_by(UtterancePlan.start_time)
         .all()
     )
@@ -845,7 +987,7 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
     subtitle_debug_rows: list[dict[str, Any]] = []
     schedule_debug_rows: list[dict[str, Any]] = []
     plan_count = len(plans)
-    update_progress(video_id, "compose", 0, "音声合成を開始...")
+    update_progress(current_video_id, "compose", 0, "音声合成を開始...")
 
     try:
         for plan_idx, plan in enumerate(plans):
@@ -856,16 +998,25 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
                 continue
 
             pct = int((plan_idx + 1) / plan_count * 80)
-            update_progress(video_id, "tts", pct, f"音声合成中: {plan_idx + 1}/{plan_count}")
+            update_progress(
+                current_video_id, "tts", pct, f"音声合成中: {plan_idx + 1}/{plan_count}"
+            )
             audio_path = str(Path(cfg.media_root) / str(commentary.id) / "audio.wav")
             instruct = _STYLE_INSTRUCT.get(commentary.style or "", "")
-            duration = tts_client.synthesize(commentary.text, audio_path, instruct=instruct)
+            speaker = _resolve_tts_speaker(commentary.style or "", cfg)
+            duration = tts_client.synthesize(
+                commentary.text,
+                audio_path,
+                speaker=speaker,
+                instruct=instruct,
+            )
             tts_debug_rows.append(
                 {
                     "index": plan_idx,
                     "plan_id": str(plan.id),
                     "commentary_id": str(commentary.id),
                     "style": commentary.style,
+                    "speaker": speaker,
                     "audio_path": audio_path,
                     "duration_seconds": duration,
                 }
@@ -873,6 +1024,9 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
 
             audio = Audio(
                 commentary_id=commentary.id,
+                tts_mode=cfg.tts_default_mode,
+                speaker=speaker,
+                language=cfg.tts_default_language,
                 storage_path=audio_path,
                 duration_seconds=duration,
             )
@@ -893,6 +1047,8 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
         normalized_entries = composer.schedule_entries(
             [entry for _, _, entry in pending_entries],
             min_gap_seconds=cfg.compose_overlap_min_gap_seconds,
+            overlap_strategy=cfg.compose_overlap_strategy,
+            min_keep_duration_seconds=cfg.compose_clip_min_keep_seconds,
         )
 
         for index, (plan, commentary, _) in enumerate(pending_entries):
@@ -955,6 +1111,8 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
             input_data={
                 "plan_count": plan_count,
                 "overlap_min_gap_seconds": cfg.compose_overlap_min_gap_seconds,
+                "overlap_strategy": cfg.compose_overlap_strategy,
+                "clip_min_keep_seconds": cfg.compose_clip_min_keep_seconds,
             },
             output_data={
                 "tts_count": len(tts_debug_rows),
@@ -966,23 +1124,24 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
             },
         )
 
-        update_progress(video_id, "compose", 85, "字幕・動画を合成準備中...")
-        update_progress(video_id, "compose", 88, "字幕ファイルを結合中...")
-        merged_srt = _merge_srt(srt_paths, video_id, cfg.media_root)
-        update_progress(video_id, "compose", 92, "映像・音声を合成中（FFmpeg）...")
-        output_path = str(Path(cfg.media_root) / str(video_id) / "output.mp4")
+        update_progress(current_video_id, "compose", 85, "字幕・動画を合成準備中...")
+        update_progress(current_video_id, "compose", 88, "字幕ファイルを結合中...")
+        merged_srt = _merge_srt(srt_paths, current_video_id, cfg.media_root)
+        update_progress(current_video_id, "compose", 92, "映像・音声を合成中（FFmpeg）...")
+        output_path = str(Path(cfg.media_root) / current_video_id / "output.mp4")
         composer.compose(video.storage_path, audio_entries, merged_srt, output_path)
         debug_recorder.save_step_io(
             "compose",
             input_data={
                 "video_id": video_id,
+                "video_id_normalized": current_video_id,
                 "input_video": video.storage_path,
                 "audio_count": len(audio_entries),
                 "merged_srt": merged_srt,
             },
             output_data={"output_path": output_path},
         )
-        update_progress(video_id, "compose", 98, "最終処理中...")
+        update_progress(current_video_id, "compose", 98, "最終処理中...")
 
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode(errors="replace") if e.stderr else ""
@@ -993,7 +1152,7 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
     logger.info("合成完了: %s", output_path)
-    update_progress(video_id, "done", 100, "合成完了")
+    update_progress(current_video_id, "done", 100, "合成完了")
     return {"status": "ok", "output_path": output_path}
 
 
@@ -1007,14 +1166,20 @@ def export_video(video_id: str, db: Session = Depends(get_db)) -> StreamingRespo
       subtitles/           — 各発話の SRT ファイル
       commentary.csv       — 発話一覧（start_time, end_time, text, style, audio_file, srt_file）
       timeline.exo         — AviUtl 拡張編集タイムライン（元動画参照）
+
+    Args:
+        video_id: エクスポート対象動画の ID。
+        db: 関連レコードを取得する DB セッション。
+
+    Returns:
+        ZIP ファイルを返すストリーミングレスポンス。
     """
-    video = db.query(Video).filter(Video.id == video_id).first()
-    if not video:
-        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    video = _get_video_or_404(db, video_id)
+    current_video_id = str(video.id)
 
     plans = (
         db.query(UtterancePlan)
-        .filter(UtterancePlan.video_id == video_id)
+        .filter(UtterancePlan.video_id == video.id)
         .order_by(UtterancePlan.start_time)
         .all()
     )
@@ -1092,13 +1257,51 @@ def export_video(video_id: str, db: Session = Depends(get_db)) -> StreamingRespo
         zf.writestr("timeline.exo", exo_bytes)
 
     buf.seek(0)
-    filename = f"aituber_export_{video_id[:8]}.zip"
+    filename = f"aituber_export_{current_video_id[:8]}.zip"
     logger.info("エクスポート: %s (%d 発話)", filename, len(csv_rows))
     return StreamingResponse(
         buf,
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+def _parse_video_uuid(video_id: str) -> uuid.UUID:
+    """動画ID文字列をUUIDへ変換する。
+
+    Args:
+        video_id: パスパラメータで受け取った動画ID文字列。
+
+    Returns:
+        正常に変換された `UUID` オブジェクト。
+
+    Raises:
+        HTTPException: UUID形式でない場合。
+    """
+    try:
+        return uuid.UUID(video_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail="動画が見つかりません") from e
+
+
+def _get_video_or_404(db: Session, video_id: str) -> Video:
+    """動画IDから動画レコードを取得し、未存在時は404を送出する。
+
+    Args:
+        db: 動画取得に利用する DB セッション。
+        video_id: 文字列形式の動画ID。
+
+    Returns:
+        取得した `Video` モデル。
+
+    Raises:
+        HTTPException: 動画ID形式が不正、または動画が存在しない場合。
+    """
+    parsed_video_id = _parse_video_uuid(video_id)
+    video = db.query(Video).filter(Video.id == parsed_video_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="動画が見つかりません")
+    return video
 
 
 def _find_segment_by_time(
@@ -1108,7 +1311,18 @@ def _find_segment_by_time(
     end_time: float,
     tolerance: float = 1e-6,
 ) -> Segment | None:
-    """開始/終了時刻で既存セグメントを検索する。"""
+    """開始/終了時刻で既存セグメントを検索する。
+
+    Args:
+        db: 検索対象セグメントを取得する DB セッション。
+        video_id: 検索対象動画 ID。
+        start_time: 探索対象の開始時刻（秒）。
+        end_time: 探索対象の終了時刻（秒）。
+        tolerance: 浮動小数誤差を吸収する許容差。
+
+    Returns:
+        一致するセグメント。存在しない場合は `None`。
+    """
     segments = db.query(Segment).filter(Segment.video_id == video_id).all()
     for segment in segments:
         if (
@@ -1120,7 +1334,15 @@ def _find_segment_by_time(
 
 
 def _events_to_results(events: list[Event], speak_threshold: float) -> list[EventResult]:
-    """DB Event を UtterancePlanner 用 EventResult に変換する。"""
+    """DB Event を UtterancePlanner 用 EventResult に変換する。
+
+    Args:
+        events: DB から読み出した `Event` モデル一覧。
+        speak_threshold: 発話推奨フラグを立てる重要度閾値。
+
+    Returns:
+        `UtterancePlanner` が扱える `EventResult` の一覧。
+    """
     results: list[EventResult] = []
     for event in events:
         importance = event.importance or 0.0
@@ -1139,6 +1361,14 @@ def _events_to_results(events: list[Event], speak_threshold: float) -> list[Even
 
 
 def _resolve_emotion_hint(importance: float) -> str:
+    """重要度から感情ラベルを返す。
+
+    Args:
+        importance: イベント重要度（0.0〜1.0 想定）。
+
+    Returns:
+        重要度帯に応じた感情ヒント（`excited` / `neutral` / `calm`）。
+    """
     if importance >= 0.8:
         return "excited"
     if importance >= 0.5:
@@ -1147,6 +1377,14 @@ def _resolve_emotion_hint(importance: float) -> str:
 
 
 def _probe_video_meta(video_path: str) -> tuple[float, float]:
+    """動画メタ情報（duration, fps）を返す。
+
+    Args:
+        video_path: メタ情報を取得する動画ファイルパス。
+
+    Returns:
+        `(duration_seconds, fps)` のタプル。
+    """
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
@@ -1156,6 +1394,16 @@ def _probe_video_meta(video_path: str) -> tuple[float, float]:
 
 
 def _merge_srt(srt_paths: list[str], video_id: str, media_root: str) -> str | None:
+    """SRT ファイル群を連結して1つの字幕ファイルへまとめる。
+
+    Args:
+        srt_paths: 結合候補の SRT ファイルパス一覧。
+        video_id: 出力先ディレクトリ名に使う動画 ID。
+        media_root: メディアルートディレクトリ。
+
+    Returns:
+        結合後 SRT ファイルパス。入力が空なら `None`。
+    """
     valid = [p for p in srt_paths if Path(p).exists()]
     if not valid:
         return None
@@ -1167,6 +1415,14 @@ def _merge_srt(srt_paths: list[str], video_id: str, media_root: str) -> str | No
 
 
 def _normalize_tags(tags: list[str]) -> list[str]:
+    """タグ配列を大小文字非依存で重複排除して返す。
+
+    Args:
+        tags: ユーザー入力などのタグ文字列一覧。
+
+    Returns:
+        前後空白除去・大文字小文字非依存重複排除後のタグ一覧。
+    """
     normalized: list[str] = []
     seen: set[str] = set()
     for raw in tags:
@@ -1182,6 +1438,15 @@ def _normalize_tags(tags: list[str]) -> list[str]:
 
 
 def _generate_thumbnail(video_path: str, thumbnail_path: str) -> None:
+    """動画からサムネイル画像を1枚生成する。
+
+    Args:
+        video_path: 入力動画ファイルパス。
+        thumbnail_path: 書き出すサムネイル画像パス。
+
+    Returns:
+        なし。
+    """
     subprocess.run(
         [
             "ffmpeg",
@@ -1200,7 +1465,14 @@ def _generate_thumbnail(video_path: str, thumbnail_path: str) -> None:
 
 
 def _to_video_read(video: Video) -> VideoRead:
-    """動画レスポンス用にタグメタデータを正規化する。"""
+    """動画レスポンス用にタグメタデータを正規化する。
+
+    Args:
+        video: レスポンスへ変換する `Video` モデル。
+
+    Returns:
+        正規化済みメタデータを含む `VideoRead`。
+    """
     metadata = normalize_video_metadata(video.video_metadata)
     return VideoRead(
         id=video.id,
@@ -1214,7 +1486,15 @@ def _to_video_read(video: Video) -> VideoRead:
 
 
 def _refresh_rule_tags(video: Video, cfg: Any) -> dict[str, Any]:
-    """RuleTagger で自動タグを更新する。"""
+    """RuleTagger で自動タグを更新する。
+
+    Args:
+        video: タグ更新対象の動画モデル。
+        cfg: ランタイム設定。TTS/LLM/VLM の既定値を参照する。
+
+    Returns:
+        `tags_auto_rule` と `tag_status.rule` を更新したメタデータ。
+    """
     rule_tagger = RuleTagger()
     metadata = normalize_video_metadata(video.video_metadata)
     metadata["tags_auto_rule"] = rule_tagger.generate(
@@ -1230,8 +1510,34 @@ def _refresh_rule_tags(video: Video, cfg: Any) -> dict[str, Any]:
     return normalize_video_metadata(metadata)
 
 
+def _resolve_tts_speaker(style: str, cfg: Any) -> str:
+    """実況スタイルに対応するTTS話者名を返す。
+
+    Args:
+        style: 実況スタイル（`excited` / `neutral` / `calm`）。
+        cfg: スタイル別話者設定を含むランタイム設定。
+
+    Returns:
+        スタイルに対応する話者名。未設定時はデフォルト話者名。
+    """
+    style_key = (style or "").strip().lower()
+    speaker_map = {
+        "excited": str(getattr(cfg, "tts_speaker_excited", "") or "").strip(),
+        "neutral": str(getattr(cfg, "tts_speaker_neutral", "") or "").strip(),
+        "calm": str(getattr(cfg, "tts_speaker_calm", "") or "").strip(),
+    }
+    return speaker_map.get(style_key) or str(cfg.tts_default_speaker)
+
+
 def _to_video_tag_read(raw_metadata: dict[str, Any] | None) -> VideoTagRead:
-    """タグ情報の API レスポンスを構築する。"""
+    """タグ情報の API レスポンスを構築する。
+
+    Args:
+        raw_metadata: DB に保存されている生の動画メタデータ。
+
+    Returns:
+        API 返却用に正規化・集約したタグ情報。
+    """
     metadata = normalize_video_metadata(raw_metadata)
     source_map = build_tag_source_map(metadata)
     return VideoTagRead(

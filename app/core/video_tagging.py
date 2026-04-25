@@ -1,3 +1,5 @@
+"""video_tagging モジュール。"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -17,7 +19,17 @@ def refresh_llm_tags(
     raw_metadata: dict[str, Any] | None,
     llm_client: LLMClient,
 ) -> dict[str, Any]:
-    """LLMTagger で自動タグを更新する。"""
+    """LLMTagger で自動タグを更新する。
+
+    Args:
+        video_id: ログ出力に使用する動画 ID。
+        video_title: LLM へ渡す動画タイトル。
+        raw_metadata: 現在の動画メタデータ。`None` でも処理可能。
+        llm_client: タグ生成に利用する LLM クライアント。
+
+    Returns:
+        LLM 生成結果と `tag_status` を反映したメタデータ。
+    """
     metadata = normalize_video_metadata(raw_metadata)
     tag_status = dict(metadata.get("tag_status", {}))
 

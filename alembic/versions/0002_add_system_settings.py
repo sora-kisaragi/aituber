@@ -19,6 +19,14 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """`system_settings` テーブルを追加する。
+
+    Args:
+        なし。
+
+    Returns:
+        なし。`system_settings` テーブルを作成する。
+    """
     op.create_table(
         "system_settings",
         sa.Column("key", sa.Text, primary_key=True),
@@ -29,4 +37,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """`system_settings` テーブルを削除する。
+
+    Args:
+        なし。
+
+    Returns:
+        なし。`system_settings` テーブルを削除する。
+    """
     op.drop_table("system_settings")

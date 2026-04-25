@@ -1,3 +1,5 @@
+"""パイプライン各段階の入出力を保存するデバッグユーティリティ。"""
+
 from __future__ import annotations
 
 import json
@@ -15,6 +17,15 @@ class PipelineDebugRecorder:
     """パイプラインの入出力とデバッグ情報をファイルへ保存する。"""
 
     def __init__(self, media_root: str, video_id: str) -> None:
+        """デバッグログ保存先を初期化する。
+
+        Args:
+            media_root: メディア保存ルート。
+            video_id: 対象動画ID。
+
+        Returns:
+            なし。デバッグログ保存用ディレクトリを作成する。
+        """
         self.video_id = video_id
         self.debug_dir = Path(media_root) / video_id / "debug"
         self.steps_dir = self.debug_dir / "steps"
@@ -28,7 +39,16 @@ class PipelineDebugRecorder:
         input_data: dict[str, Any],
         output_data: dict[str, Any],
     ) -> str | None:
-        """ステップ入出力を JSON ファイルとして保存する。"""
+        """ステップ入出力を JSON ファイルとして保存する。
+
+        Args:
+            step_name: ステップ名。
+            input_data: ステップ入力情報。
+            output_data: ステップ出力情報。
+
+        Returns:
+            保存先ファイルパス。保存失敗時は `None`。
+        """
         self._step_index += 1
         file_name = f"{self._step_index:02d}_{_sanitize_step_name(step_name)}.json"
         output_path = self.steps_dir / file_name
@@ -49,7 +69,18 @@ class PipelineDebugRecorder:
         input_data: dict[str, Any],
         output_data: dict[str, Any],
     ) -> str | None:
-        """セグメント単位のデバッグ情報を JSONL 形式で追記する。"""
+        """セグメント単位のデバッグ情報を JSONL 形式で追記する。
+
+        Args:
+            segment_index: セグメントインデックス。
+            segment_id: セグメントID。
+            stage: セグメント内ステージ名。
+            input_data: ステージ入力情報。
+            output_data: ステージ出力情報。
+
+        Returns:
+            JSONL ログファイルパス。保存失敗時は `None`。
+        """
         payload = {
             "video_id": self.video_id,
             "segment_index": segment_index,
@@ -77,6 +108,7 @@ class PipelineDebugRecorder:
     def _write_json_file(
         self, output_path: Path, payload: dict[str, Any], label: str
     ) -> str | None:
+        """JSON ファイル書き込みを実行し、保存先を返す。"""
         try:
             output_path.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2),
@@ -90,11 +122,13 @@ class PipelineDebugRecorder:
 
 
 def _sanitize_step_name(step_name: str) -> str:
+    """ファイル名として安全なステップ名へ変換する。"""
     normalized = re.sub(r"[^A-Za-z0-9_-]+", "_", step_name).strip("_")
     return normalized or "step"
 
 
 def _to_jsonable(value: Any) -> Any:
+    """任意オブジェクトを JSON シリアライズ可能な値へ変換する。"""
     if isinstance(value, str | int | float | bool) or value is None:
         return value
     if isinstance(value, datetime | date):

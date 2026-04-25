@@ -1,3 +1,5 @@
+"""test_pipeline_debug モジュール。"""
+
 from __future__ import annotations
 
 import json
@@ -9,10 +11,20 @@ from app.utils.pipeline_debug import PipelineDebugRecorder
 
 @dataclass
 class _DummyObject:
+    """_DummyObject を表すクラス。"""
+
     label: str
 
 
 def test_save_step_io_with_dataclass_and_path_writes_json(tmp_path: Path) -> None:
+    """test_save_step_io_with_dataclass_and_path_writes_json の動作を検証する。
+
+    Args:
+        tmp_path: テスト専用の一時ディレクトリ。
+
+    Returns:
+        なし。dataclass/Path を含む入出力が保存できることを検証する。
+    """
     recorder = PipelineDebugRecorder(str(tmp_path), "video-001")
     output_path = recorder.save_step_io(
         step_name="segment step",
@@ -33,6 +45,14 @@ def test_save_step_io_with_dataclass_and_path_writes_json(tmp_path: Path) -> Non
 
 
 def test_append_segment_debug_when_called_twice_appends_jsonl(tmp_path: Path) -> None:
+    """test_append_segment_debug_when_called_twice_appends_jsonl の動作を検証する。
+
+    Args:
+        tmp_path: テスト専用の一時ディレクトリ。
+
+    Returns:
+        なし。JSONL 追記時に行が増えることを検証する。
+    """
     recorder = PipelineDebugRecorder(str(tmp_path), "video-xyz")
     log_path = recorder.append_segment_debug(
         segment_index=0,

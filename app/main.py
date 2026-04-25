@@ -1,3 +1,5 @@
+"""FastAPI アプリケーションのエントリーポイント。"""
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -28,4 +30,12 @@ app.mount("/media", StaticFiles(directory=app_settings.media_root, check_dir=Fal
 
 @app.get("/health")
 def health() -> dict:
+    """ヘルスチェック結果を返す。
+
+    Args:
+        なし。
+
+    Returns:
+        サーバー稼働状態を示す辞書。
+    """
     return {"status": "ok"}

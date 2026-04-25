@@ -1,7 +1,17 @@
+"""test_rule_tagger モジュール。"""
+
 from app.core.rule_tagger import RuleTagger
 
 
 def test_generate_returns_expected_rule_tags() -> None:
+    """test_generate_returns_expected_rule_tags の動作を検証する。
+
+    Args:
+        なし。
+
+    Returns:
+        なし。主要設定値から期待タグが組み立つことを検証する。
+    """
     tagger = RuleTagger()
 
     tags = tagger.generate(
@@ -22,6 +32,14 @@ def test_generate_returns_expected_rule_tags() -> None:
 
 
 def test_generate_uses_unknown_bucket_for_invalid_values() -> None:
+    """test_generate_uses_unknown_bucket_for_invalid_values の動作を検証する。
+
+    Args:
+        なし。
+
+    Returns:
+        なし。不正値入力時に `unknown` バケット化されることを検証する。
+    """
     tagger = RuleTagger()
 
     tags = tagger.generate(
@@ -42,6 +60,14 @@ def test_generate_uses_unknown_bucket_for_invalid_values() -> None:
 
 
 def test_generate_length_bucket_for_short_and_long() -> None:
+    """test_generate_length_bucket_for_short_and_long の動作を検証する。
+
+    Args:
+        なし。
+
+    Returns:
+        なし。動画長に応じた length タグが付与されることを検証する。
+    """
     tagger = RuleTagger()
 
     short_tags = tagger.generate(

@@ -1,3 +1,5 @@
+"""システム設定の参照・更新 API を提供する。"""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -19,6 +21,9 @@ _DESCRIPTIONS: dict[str, str] = {
     "tts_default_speaker": "TTS デフォルト話者名（custom_voice 時）",
     "tts_default_language": "TTS 言語（auto / japanese / english）",
     "tts_default_instruct": "TTS スタイル指示文（空 = スタイルマップを使用）",
+    "tts_speaker_excited": "スタイル excited 用の話者名（空ならデフォルト話者）",
+    "tts_speaker_neutral": "スタイル neutral 用の話者名（空ならデフォルト話者）",
+    "tts_speaker_calm": "スタイル calm 用の話者名（空ならデフォルト話者）",
     "llm_api_base": "LLM API ベース URL（OpenAI 互換）",
     "llm_api_key": "LLM API キー",
     "llm_model_name": "実況生成に使う LLM モデル名",
@@ -33,6 +38,8 @@ _DESCRIPTIONS: dict[str, str] = {
     "planner_talk_window_seconds": "発話率計算に使う時間窓（秒）",
     "planner_max_queue_delay_seconds": "イベント発生から遅延許容する最大秒数（秒）",
     "compose_overlap_min_gap_seconds": "合成時に発話同士へ追加する最小間隔（秒）",
+    "compose_overlap_strategy": "重複時の解消戦略（shift / clip_previous）",
+    "compose_clip_min_keep_seconds": "clip_previous 時に残す最小発話長（秒未満は破棄）",
 }
 
 # Web UI から変更を許可するキー（database_url・media_root 等はサーバー管理）
@@ -42,6 +49,9 @@ _EDITABLE_KEYS: set[str] = {
     "tts_default_speaker",
     "tts_default_language",
     "tts_default_instruct",
+    "tts_speaker_excited",
+    "tts_speaker_neutral",
+    "tts_speaker_calm",
     "llm_api_base",
     "llm_api_key",
     "llm_model_name",
@@ -56,12 +66,21 @@ _EDITABLE_KEYS: set[str] = {
     "planner_talk_window_seconds",
     "planner_max_queue_delay_seconds",
     "compose_overlap_min_gap_seconds",
+    "compose_overlap_strategy",
+    "compose_clip_min_keep_seconds",
 }
 
 
 @router.get("/", response_model=list[SystemSettingRead])
 def get_settings(db: Session = Depends(get_db)) -> list[SystemSettingRead]:
-    """現在の設定一覧を返す。DB 値がなければ .env のデフォルト値を返す。"""
+    """現在の設定一覧を返す。
+
+    Args:
+        db: DB セッション。
+
+    Returns:
+        UI で編集可能な設定の一覧。DB 値がない場合は `.env` の既定値を返す。
+    """
     db_map = {r.key: r.value for r in db.query(SystemSetting).all()}
     env_dict = settings.model_dump()
 
@@ -83,7 +102,15 @@ def update_settings(
     updates: list[SystemSettingUpdate],
     db: Session = Depends(get_db),
 ) -> list[SystemSettingRead]:
-    """設定を DB に保存する。未知のキーは無視する。"""
+    """設定を DB に保存する。
+
+    Args:
+        updates: 更新対象の設定キーと値。
+        db: DB セッション。
+
+    Returns:
+        更新後の設定一覧。
+    """
     for item in updates:
         if item.key not in _EDITABLE_KEYS:
             continue

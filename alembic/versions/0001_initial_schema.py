@@ -20,6 +20,14 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    """初期スキーマを作成する。
+
+    Args:
+        なし。
+
+    Returns:
+        なし。初期テーブル群と関連インデックスを作成する。
+    """
     op.create_table(
         "videos",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
@@ -147,6 +155,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """初期スキーマで作成したテーブルを削除する。
+
+    Args:
+        なし。
+
+    Returns:
+        なし。`upgrade` で作成したオブジェクトを削除する。
+    """
     op.drop_table("subtitles")
     op.drop_table("audios")
     op.drop_table("commentaries")

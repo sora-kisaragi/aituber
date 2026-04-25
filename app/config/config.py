@@ -1,3 +1,5 @@
+"""アプリ設定の定義と実行時オーバーライド解決を提供する。"""
+
 from __future__ import annotations
 
 import contextlib
@@ -10,6 +12,8 @@ if TYPE_CHECKING:
 
 
 class Settings(BaseSettings):
+    """アプリ全体で利用する設定値を保持する。"""
+
     database_url: str = "postgresql://localhost/aituber"
 
     tts_base_url: str = "http://localhost:7865"
@@ -17,6 +21,9 @@ class Settings(BaseSettings):
     tts_default_speaker: str = "ono_anna"
     tts_default_language: str = "japanese"
     tts_default_instruct: str = ""
+    tts_speaker_excited: str = ""
+    tts_speaker_neutral: str = ""
+    tts_speaker_calm: str = ""
 
     llm_api_base: str = "https://api.openai.com/v1"
     llm_api_key: str = ""
@@ -36,6 +43,8 @@ class Settings(BaseSettings):
     planner_talk_window_seconds: float = 60.0
     planner_max_queue_delay_seconds: float = 3.0
     compose_overlap_min_gap_seconds: float = 0.0
+    compose_overlap_strategy: str = "clip_previous"
+    compose_clip_min_keep_seconds: float = 0.3
 
     model_config = {"env_file": ".env"}
 
@@ -44,7 +53,14 @@ settings = Settings()
 
 
 def get_runtime_settings(db: Session) -> Settings:
-    """DB の system_settings で .env 値を上書きした Settings を返す。"""
+    """DB の system_settings で .env 値を上書きした Settings を返す。
+
+    Args:
+        db: DB セッション。
+
+    Returns:
+        `.env` の設定値に DB の上書きを適用した `Settings`。
+    """
     from app.models.models import SystemSetting
 
     rows = db.query(SystemSetting).all()
