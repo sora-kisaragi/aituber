@@ -96,6 +96,33 @@ test: EventServiceの異常系テストを追加
 
 ---
 
+## 自走専用フロー（long-run）
+
+長時間作業は、`main` へ直接積まずに自走専用ブランチへ集約する。
+
+```text
+main
+└─ autopilot/<topic>          ← 自走専用親ブランチ
+   ├─ feature/<task-a>        ← 子ブランチA
+   ├─ fix/<task-b>            ← 子ブランチB
+   └─ ...
+```
+
+### 手順
+
+1. `main` から `autopilot/<topic>` を作成
+2. 子ブランチを `autopilot/<topic>` から作成して実装
+3. 子ブランチを `autopilot/<topic>` に順次マージ
+4. すべて完了後に `autopilot/<topic>` から `main` へ PR
+
+### ポイント
+
+- 作業途中の子ブランチは `main` に直接 PR しない
+- 最終的なレビュー単位は `autopilot/<topic> -> main` の1本にまとめる
+- 進捗通知は Git hooks ではなく Codex hooks（Discord 通知）を使う
+
+---
+
 ## タグ・リリース
 
 | タグ形式 | タイミング |
