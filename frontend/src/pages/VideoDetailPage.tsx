@@ -15,20 +15,23 @@ export default function VideoDetailPage() {
   const { id } = useParams<{ id: string }>()
   const [tagInput, setTagInput] = useState('')
   const [tagSaving, setTagSaving] = useState(false)
-  const { data: video, isLoading } = useQuery({
+  const { data: video, isLoading, isError, error } = useQuery({
     queryKey: ['video', id],
     queryFn: () => getVideo(id!),
     enabled: !!id,
+    retry: false,
   })
   const { data: tagInfo, refetch: refetchTags } = useQuery({
     queryKey: ['video-tags', id],
     queryFn: () => getVideoTags(id!),
     enabled: !!id,
+    retry: false,
   })
   const { data: timeline, refetch: refetchTimeline } = useQuery({
     queryKey: ['timeline', id],
     queryFn: () => getTimeline(id!),
     enabled: !!id,
+    retry: false,
   })
 
   const { progress: sseProgress, start } = useSSE(id ?? null)
@@ -75,6 +78,13 @@ export default function VideoDetailPage() {
   const failOp = () => setOpState('idle')
 
   if (isLoading) return <p className="text-gray-400">読み込み中...</p>
+  if (isError) {
+    const status = (error as { response?: { status?: number } } | null)?.response?.status
+    if (status === 404) {
+      return <p className="text-red-500">動画が見つかりません</p>
+    }
+    return <p className="text-red-500">動画の読み込みに失敗しました</p>
+  }
   if (!video) return <p className="text-red-500">動画が見つかりません</p>
 
   const inputSrc = timeline?.input_rel
