@@ -154,13 +154,14 @@ mp4 入力
 - `sample_data/videos/` の mp4 はコミットしない
 - DB マイグレーションは自動生成後に内容確認してからコミットする
 - `app/core/` に外部 API 呼び出しを追加しない（`app/clients/` に実装する）
+- Discord 通知は Git hooks ではなく Codex hooks（`.codex/hooks/`）を使う
 
 ---
 
 ## Skills
 
 共通スキル:
-- `start` / `ship` / `sync-main` / `new-feature`
+- `start` / `ship` / `sync-main` / `new-feature` / `long-run`
 - `create-issue` / `update-skill`
 - `review` / `py-review` / `test-check`
 
