@@ -108,3 +108,81 @@ def test_generate_when_non_json_response_raises_value_error() -> None:
             current_tags=[],
             llm_client=client,
         )
+
+
+def test_generate_when_extended_prefixes_exist_returns_normalized_auto_tags() -> None:
+    """test_generate_when_extended_prefixes_exist_returns_normalized_auto_tags の動作を検証する。
+
+    Args:
+        なし。
+
+    Returns:
+        なし。拡張プレフィックスの受理を検証する。
+    """
+    client = DummyLLMClient(
+        '{"tags_auto_llm": ["scene:Boss Intro", "situation:clutch", "place:urban city", '
+        '"environment:outdoor", "time:night", "weather:rainy"], "tags_suggested_llm": []}'
+    )
+
+    result = LLMTagger().generate(
+        video_title="Night Battle",
+        current_tags=["genre:action"],
+        llm_client=client,
+    )
+
+    assert result["tags_auto_llm"] == [
+        "scene:boss_intro",
+        "situation:clutch",
+        "place:urban_city",
+        "environment:outdoor",
+        "time:night",
+        "weather:rainy",
+    ]
+    assert result["tags_suggested_llm"] == []
+
+
+def test_generate_when_noise_values_exist_filters_them_out() -> None:
+    """test_generate_when_noise_values_exist_filters_them_out の動作を検証する。
+
+    Args:
+        なし。
+
+    Returns:
+        なし。`unknown` / `other` 系ノイズ除外を検証する。
+    """
+    client = DummyLLMClient(
+        '{"tags_auto_llm": ["genre:unknown", "topic:other", "scene:boss_fight"], '
+        '"tags_suggested_llm": ["candidate:unknown", "Final Boss"]}'
+    )
+
+    result = LLMTagger().generate(
+        video_title="Noise",
+        current_tags=[],
+        llm_client=client,
+    )
+
+    assert result["tags_auto_llm"] == ["scene:boss_fight"]
+    assert result["tags_suggested_llm"] == ["candidate:final_boss"]
+
+
+def test_generate_when_same_prefix_too_many_limits_auto_tags_per_prefix() -> None:
+    """test_generate_when_same_prefix_too_many_limits_auto_tags_per_prefix の動作を検証する。
+
+    Args:
+        なし。
+
+    Returns:
+        なし。同一プレフィックスが上限件数に制限されることを検証する。
+    """
+    client = DummyLLMClient(
+        '{"tags_auto_llm": ["topic:a", "topic:b", "topic:c", "topic:d", "topic:e"], '
+        '"tags_suggested_llm": []}'
+    )
+
+    result = LLMTagger().generate(
+        video_title="Topic Heavy",
+        current_tags=[],
+        llm_client=client,
+    )
+
+    assert result["tags_auto_llm"] == ["topic:a", "topic:b", "topic:c"]
