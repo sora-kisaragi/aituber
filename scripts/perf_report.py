@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""performance.json を読み取り、要約レポートを出力するCLI。"""
+
 from __future__ import annotations
 
 import argparse
@@ -8,6 +10,14 @@ from typing import Any
 
 
 def parse_args() -> argparse.Namespace:
+    """CLI 引数を解析する。
+
+    Args:
+        なし。
+
+    Returns:
+        解析済みの CLI 引数。
+    """
     parser = argparse.ArgumentParser(description="パイプライン性能レポートを表示する")
     parser.add_argument("--media-root", default="/var/aituber/media", help="media ルート")
     parser.add_argument("--video-id", default="", help="対象 video_id（省略時は最新）")
@@ -16,6 +26,18 @@ def parse_args() -> argparse.Namespace:
 
 
 def resolve_perf_path(media_root: str, video_id: str) -> Path:
+    """対象の performance.json ファイルパスを解決する。
+
+    Args:
+        media_root: メディア保存ルート。
+        video_id: 対象動画ID。空文字の場合は最新を選ぶ。
+
+    Returns:
+        読み込み対象となる performance.json のパス。
+
+    Raises:
+        FileNotFoundError: 対象ファイルが存在しない場合。
+    """
     root = Path(media_root)
     if video_id:
         path = root / video_id / "debug" / "performance.json"
@@ -34,6 +56,14 @@ def resolve_perf_path(media_root: str, video_id: str) -> Path:
 
 
 def summarize(payload: dict[str, Any]) -> dict[str, Any]:
+    """性能レポートJSONを画面表示向けに要約する。
+
+    Args:
+        payload: performance.json の辞書データ。
+
+    Returns:
+        主要メトリクスを抽出した要約辞書。
+    """
     steps = payload.get("steps", [])
     sorted_steps = sorted(steps, key=lambda x: float(x.get("elapsed_ms", 0.0)), reverse=True)
     top_steps = sorted_steps[:5]
@@ -62,6 +92,14 @@ def summarize(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def print_text(summary: dict[str, Any]) -> None:
+    """要約情報をテキスト形式で標準出力へ表示する。
+
+    Args:
+        summary: `summarize` が返す要約辞書。
+
+    Returns:
+        なし。標準出力へ人間向けレポートを表示する。
+    """
     total_s = float(summary.get("total_elapsed_ms", 0.0)) / 1000
     print(f"video_id: {summary.get('video_id')}")
     print(f"total_elapsed: {total_s:.2f}s")
@@ -79,6 +117,14 @@ def print_text(summary: dict[str, Any]) -> None:
 
 
 def main() -> int:
+    """CLI エントリーポイント。
+
+    Args:
+        なし。
+
+    Returns:
+        終了コード（成功時 0）。
+    """
     args = parse_args()
     perf_path = resolve_perf_path(args.media_root, args.video_id)
     payload = json.loads(perf_path.read_text(encoding="utf-8"))

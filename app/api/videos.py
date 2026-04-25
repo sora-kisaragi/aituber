@@ -1,3 +1,5 @@
+"""動画管理・パイプライン実行関連の API エンドポイントを提供する。"""
+
 from __future__ import annotations
 
 import csv
@@ -68,7 +70,16 @@ def upload_video(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ) -> VideoRead:
-    """動画ファイルをアップロードして DB に登録する。"""
+    """動画ファイルをアップロードして DB に登録する。
+
+    Args:
+        title: 明示指定された動画タイトル。空文字の場合はファイル名を代替で使用する。
+        file: クライアントから受け取る動画ファイル本体。
+        db: 動画レコードの保存に使う DB セッション。
+
+    Returns:
+        登録した動画のメタ情報を含むレスポンス。
+    """
     video_id = uuid.uuid4()
     media_dir = Path(settings.media_root) / str(video_id)
     media_dir.mkdir(parents=True, exist_ok=True)
@@ -109,13 +120,29 @@ def upload_video(
 
 @router.get("/", response_model=list[VideoRead])
 def list_videos(db: Session = Depends(get_db)) -> list[VideoRead]:
+    """登録済み動画一覧を作成日時の降順で返す。
+
+    Args:
+        db: 動画一覧を取得する DB セッション。
+
+    Returns:
+        新しい順に並んだ動画一覧。
+    """
     videos = db.query(Video).order_by(Video.created_at.desc()).all()
     return [_to_video_read(video) for video in videos]
 
 
 @router.delete("/{video_id}")
 def delete_video(video_id: str, db: Session = Depends(get_db)) -> dict:
-    """動画レコードと関連メディアを削除する。"""
+    """動画レコードと関連メディアを削除する。
+
+    Args:
+        video_id: 削除対象動画の ID。
+        db: レコード削除に使用する DB セッション。
+
+    Returns:
+        削除結果 (`status`, `video_id`) を含む辞書。
+    """
     video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
         raise HTTPException(status_code=404, detail="動画が見つかりません")
@@ -142,6 +169,15 @@ def delete_video(video_id: str, db: Session = Depends(get_db)) -> dict:
 
 @router.get("/{video_id}", response_model=VideoRead)
 def get_video(video_id: str, db: Session = Depends(get_db)) -> VideoRead:
+    """動画IDを指定して動画詳細を返す。
+
+    Args:
+        video_id: 取得対象動画の ID。
+        db: 動画情報を取得する DB セッション。
+
+    Returns:
+        対象動画の詳細情報。
+    """
     video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
         raise HTTPException(status_code=404, detail="動画が見つかりません")
@@ -150,7 +186,15 @@ def get_video(video_id: str, db: Session = Depends(get_db)) -> VideoRead:
 
 @router.get("/{video_id}/tags", response_model=VideoTagRead)
 def get_video_tags(video_id: str, db: Session = Depends(get_db)) -> VideoTagRead:
-    """動画タグ（manual/rule/llm/effective）とソース情報を返す。"""
+    """動画タグ（manual/rule/llm/effective）とソース情報を返す。
+
+    Args:
+        video_id: タグを取得する動画の ID。
+        db: 動画レコード参照に使う DB セッション。
+
+    Returns:
+        手動タグ・自動タグ・有効タグとタグソースをまとめたレスポンス。
+    """
     video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
         raise HTTPException(status_code=404, detail="動画が見つかりません")
@@ -159,7 +203,16 @@ def get_video_tags(video_id: str, db: Session = Depends(get_db)) -> VideoTagRead
 
 @router.patch("/{video_id}", response_model=VideoRead)
 def update_video(video_id: str, payload: VideoUpdate, db: Session = Depends(get_db)) -> VideoRead:
-    """動画のタイトル・タグを更新する。"""
+    """動画のタイトル・タグを更新する。
+
+    Args:
+        video_id: 更新対象動画の ID。
+        payload: 更新内容。タイトルと手動タグの更新を受け付ける。
+        db: 更新処理に利用する DB セッション。
+
+    Returns:
+        更新後の動画情報。
+    """
     video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
         raise HTTPException(status_code=404, detail="動画が見つかりません")
@@ -190,7 +243,15 @@ def update_video(video_id: str, payload: VideoUpdate, db: Session = Depends(get_
 
 @router.post("/{video_id}/tags/rule:refresh", response_model=VideoTagRead)
 def refresh_video_rule_tags(video_id: str, db: Session = Depends(get_db)) -> VideoTagRead:
-    """RuleTagger で tags_auto_rule を再生成する。"""
+    """RuleTagger で tags_auto_rule を再生成する。
+
+    Args:
+        video_id: ルールベースタグを更新する動画の ID。
+        db: 動画取得・保存に利用する DB セッション。
+
+    Returns:
+        更新後タグ情報。
+    """
     video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
         raise HTTPException(status_code=404, detail="動画が見つかりません")
@@ -213,7 +274,15 @@ def refresh_video_rule_tags(video_id: str, db: Session = Depends(get_db)) -> Vid
 
 @router.post("/{video_id}/tags/llm:refresh", response_model=VideoTagRead)
 def refresh_video_llm_tags(video_id: str, db: Session = Depends(get_db)) -> VideoTagRead:
-    """LLM タグを再生成する。"""
+    """LLM タグを再生成する。
+
+    Args:
+        video_id: LLM タグを更新する動画の ID。
+        db: 動画取得・保存に利用する DB セッション。
+
+    Returns:
+        更新後タグ情報。
+    """
     video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
         raise HTTPException(status_code=404, detail="動画が見つかりません")
@@ -246,7 +315,15 @@ def refresh_video_llm_tags(video_id: str, db: Session = Depends(get_db)) -> Vide
 
 @router.post("/{video_id}/tags/refresh", response_model=VideoTagRead)
 def refresh_video_tags(video_id: str, db: Session = Depends(get_db)) -> VideoTagRead:
-    """Rule/LLM のタグ再生成をまとめて実行する。"""
+    """Rule/LLM のタグ再生成をまとめて実行する。
+
+    Args:
+        video_id: タグ再生成対象動画の ID。
+        db: タグ更新結果を保存する DB セッション。
+
+    Returns:
+        ルール・LLM 両方の更新を反映したタグ情報。
+    """
     video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
         raise HTTPException(status_code=404, detail="動画が見つかりません")
@@ -280,7 +357,15 @@ def refresh_video_tags(video_id: str, db: Session = Depends(get_db)) -> VideoTag
 
 @router.get("/{video_id}/timeline", response_model=VideoTimeline)
 def get_timeline(video_id: str, db: Session = Depends(get_db)) -> VideoTimeline:
-    """動画の発話計画・実況テキスト・音声パスを一覧で返す。"""
+    """動画の発話計画・実況テキスト・音声パスを一覧で返す。
+
+    Args:
+        video_id: タイムラインを取得する動画の ID。
+        db: 発話計画と実況データを参照する DB セッション。
+
+    Returns:
+        入力動画相対パスと実況タイムライン項目の集合。
+    """
     video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
         raise HTTPException(status_code=404, detail="動画が見つかりません")
@@ -326,7 +411,16 @@ def process_video(
     rerun_failed_only: bool = Query(default=False),
     db: Session = Depends(get_db),
 ) -> dict:
-    """動画を分割 → フレーム抽出 → イベント検出 → 発話計画 → 実況生成まで実行する。"""
+    """動画を分割 → フレーム抽出 → イベント検出 → 発話計画 → 実況生成まで実行する。
+
+    Args:
+        video_id: 処理対象動画の ID。
+        rerun_failed_only: `True` の場合は前回失敗したセグメントのみ再処理する。
+        db: 各ステップ結果を読み書きする DB セッション。
+
+    Returns:
+        実行結果サマリー。処理済み/再利用/失敗セグメント番号を含む。
+    """
     video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
         raise HTTPException(status_code=404, detail="動画が見つかりません")
@@ -813,7 +907,15 @@ def process_video(
 
 @router.post("/{video_id}/compose")
 def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
-    """実況音声・字幕を合成して最終動画を出力する。"""
+    """実況音声・字幕を合成して最終動画を出力する。
+
+    Args:
+        video_id: 合成対象動画の ID。
+        db: 発話計画・実況・音声・字幕を参照/保存する DB セッション。
+
+    Returns:
+        出力動画のパスを含む結果辞書。
+    """
     video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
         raise HTTPException(status_code=404, detail="動画が見つかりません")
@@ -1017,6 +1119,13 @@ def export_video(video_id: str, db: Session = Depends(get_db)) -> StreamingRespo
       subtitles/           — 各発話の SRT ファイル
       commentary.csv       — 発話一覧（start_time, end_time, text, style, audio_file, srt_file）
       timeline.exo         — AviUtl 拡張編集タイムライン（元動画参照）
+
+    Args:
+        video_id: エクスポート対象動画の ID。
+        db: 関連レコードを取得する DB セッション。
+
+    Returns:
+        ZIP ファイルを返すストリーミングレスポンス。
     """
     video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
@@ -1118,7 +1227,18 @@ def _find_segment_by_time(
     end_time: float,
     tolerance: float = 1e-6,
 ) -> Segment | None:
-    """開始/終了時刻で既存セグメントを検索する。"""
+    """開始/終了時刻で既存セグメントを検索する。
+
+    Args:
+        db: 検索対象セグメントを取得する DB セッション。
+        video_id: 検索対象動画 ID。
+        start_time: 探索対象の開始時刻（秒）。
+        end_time: 探索対象の終了時刻（秒）。
+        tolerance: 浮動小数誤差を吸収する許容差。
+
+    Returns:
+        一致するセグメント。存在しない場合は `None`。
+    """
     segments = db.query(Segment).filter(Segment.video_id == video_id).all()
     for segment in segments:
         if (
@@ -1130,7 +1250,15 @@ def _find_segment_by_time(
 
 
 def _events_to_results(events: list[Event], speak_threshold: float) -> list[EventResult]:
-    """DB Event を UtterancePlanner 用 EventResult に変換する。"""
+    """DB Event を UtterancePlanner 用 EventResult に変換する。
+
+    Args:
+        events: DB から読み出した `Event` モデル一覧。
+        speak_threshold: 発話推奨フラグを立てる重要度閾値。
+
+    Returns:
+        `UtterancePlanner` が扱える `EventResult` の一覧。
+    """
     results: list[EventResult] = []
     for event in events:
         importance = event.importance or 0.0
@@ -1149,6 +1277,14 @@ def _events_to_results(events: list[Event], speak_threshold: float) -> list[Even
 
 
 def _resolve_emotion_hint(importance: float) -> str:
+    """重要度から感情ラベルを返す。
+
+    Args:
+        importance: イベント重要度（0.0〜1.0 想定）。
+
+    Returns:
+        重要度帯に応じた感情ヒント（`excited` / `neutral` / `calm`）。
+    """
     if importance >= 0.8:
         return "excited"
     if importance >= 0.5:
@@ -1157,6 +1293,14 @@ def _resolve_emotion_hint(importance: float) -> str:
 
 
 def _probe_video_meta(video_path: str) -> tuple[float, float]:
+    """動画メタ情報（duration, fps）を返す。
+
+    Args:
+        video_path: メタ情報を取得する動画ファイルパス。
+
+    Returns:
+        `(duration_seconds, fps)` のタプル。
+    """
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
@@ -1166,6 +1310,16 @@ def _probe_video_meta(video_path: str) -> tuple[float, float]:
 
 
 def _merge_srt(srt_paths: list[str], video_id: str, media_root: str) -> str | None:
+    """SRT ファイル群を連結して1つの字幕ファイルへまとめる。
+
+    Args:
+        srt_paths: 結合候補の SRT ファイルパス一覧。
+        video_id: 出力先ディレクトリ名に使う動画 ID。
+        media_root: メディアルートディレクトリ。
+
+    Returns:
+        結合後 SRT ファイルパス。入力が空なら `None`。
+    """
     valid = [p for p in srt_paths if Path(p).exists()]
     if not valid:
         return None
@@ -1177,6 +1331,14 @@ def _merge_srt(srt_paths: list[str], video_id: str, media_root: str) -> str | No
 
 
 def _normalize_tags(tags: list[str]) -> list[str]:
+    """タグ配列を大小文字非依存で重複排除して返す。
+
+    Args:
+        tags: ユーザー入力などのタグ文字列一覧。
+
+    Returns:
+        前後空白除去・大文字小文字非依存重複排除後のタグ一覧。
+    """
     normalized: list[str] = []
     seen: set[str] = set()
     for raw in tags:
@@ -1192,6 +1354,15 @@ def _normalize_tags(tags: list[str]) -> list[str]:
 
 
 def _generate_thumbnail(video_path: str, thumbnail_path: str) -> None:
+    """動画からサムネイル画像を1枚生成する。
+
+    Args:
+        video_path: 入力動画ファイルパス。
+        thumbnail_path: 書き出すサムネイル画像パス。
+
+    Returns:
+        なし。
+    """
     subprocess.run(
         [
             "ffmpeg",
@@ -1210,7 +1381,14 @@ def _generate_thumbnail(video_path: str, thumbnail_path: str) -> None:
 
 
 def _to_video_read(video: Video) -> VideoRead:
-    """動画レスポンス用にタグメタデータを正規化する。"""
+    """動画レスポンス用にタグメタデータを正規化する。
+
+    Args:
+        video: レスポンスへ変換する `Video` モデル。
+
+    Returns:
+        正規化済みメタデータを含む `VideoRead`。
+    """
     metadata = normalize_video_metadata(video.video_metadata)
     return VideoRead(
         id=video.id,
@@ -1224,7 +1402,15 @@ def _to_video_read(video: Video) -> VideoRead:
 
 
 def _refresh_rule_tags(video: Video, cfg: Any) -> dict[str, Any]:
-    """RuleTagger で自動タグを更新する。"""
+    """RuleTagger で自動タグを更新する。
+
+    Args:
+        video: タグ更新対象の動画モデル。
+        cfg: ランタイム設定。TTS/LLM/VLM の既定値を参照する。
+
+    Returns:
+        `tags_auto_rule` と `tag_status.rule` を更新したメタデータ。
+    """
     rule_tagger = RuleTagger()
     metadata = normalize_video_metadata(video.video_metadata)
     metadata["tags_auto_rule"] = rule_tagger.generate(
@@ -1241,6 +1427,15 @@ def _refresh_rule_tags(video: Video, cfg: Any) -> dict[str, Any]:
 
 
 def _resolve_tts_speaker(style: str, cfg: Any) -> str:
+    """実況スタイルに対応するTTS話者名を返す。
+
+    Args:
+        style: 実況スタイル（`excited` / `neutral` / `calm`）。
+        cfg: スタイル別話者設定を含むランタイム設定。
+
+    Returns:
+        スタイルに対応する話者名。未設定時はデフォルト話者名。
+    """
     style_key = (style or "").strip().lower()
     speaker_map = {
         "excited": str(getattr(cfg, "tts_speaker_excited", "") or "").strip(),
@@ -1251,7 +1446,14 @@ def _resolve_tts_speaker(style: str, cfg: Any) -> str:
 
 
 def _to_video_tag_read(raw_metadata: dict[str, Any] | None) -> VideoTagRead:
-    """タグ情報の API レスポンスを構築する。"""
+    """タグ情報の API レスポンスを構築する。
+
+    Args:
+        raw_metadata: DB に保存されている生の動画メタデータ。
+
+    Returns:
+        API 返却用に正規化・集約したタグ情報。
+    """
     metadata = normalize_video_metadata(raw_metadata)
     source_map = build_tag_source_map(metadata)
     return VideoTagRead(

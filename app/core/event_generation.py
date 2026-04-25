@@ -1,3 +1,5 @@
+"""VLM 解析結果からイベント種別と重要度を推定する。"""
+
 from __future__ import annotations
 
 import uuid
@@ -9,6 +11,8 @@ from app.core.vision import VisionAnalysis
 
 @dataclass
 class EventResult:
+    """イベント推定結果を保持する。"""
+
     event_id: str
     timestamp: float
     event_type: str
@@ -40,7 +44,16 @@ class EventService:
         segment_start_time: float,
         frame_analyses: list[VisionAnalysis],
     ) -> list[EventResult]:
-        """セグメントのフレーム解析からイベントを生成する。最低 1 件を保証する。"""
+        """セグメントのフレーム解析からイベントを生成する。
+
+        Args:
+            segment_id: 対象セグメントID（ログ追跡用）。
+            segment_start_time: セグメント開始時刻（秒）。
+            frame_analyses: フレーム解析結果の配列。
+
+        Returns:
+            イベント推定結果の配列。入力が空でも最低1件を返す。
+        """
         events: list[EventResult] = []
 
         for analysis in frame_analyses:
@@ -78,6 +91,14 @@ class EventService:
         return events
 
     def _calc_importance(self, analysis: VisionAnalysis) -> float:
+        """解析結果からイベント重要度を推定する。
+
+        Args:
+            analysis: 1フレーム分の視覚解析結果。
+
+        Returns:
+            キーワード補正後に 0.0〜1.0 へ丸めた重要度。
+        """
         score = analysis.confidence
         action_text = " ".join(str(a).lower() for a in analysis.actions)
         summary_text = (analysis.scene_summary or "").lower()
@@ -101,6 +122,14 @@ class EventService:
         return round(score, 2)
 
     def _infer_type(self, analysis: VisionAnalysis) -> str:
+        """解析結果からイベント種別を推定する。
+
+        Args:
+            analysis: 1フレーム分の視覚解析結果。
+
+        Returns:
+            推定イベント種別（`kill` / `death` / `combat` など）。
+        """
         action_text = " ".join(str(a).lower() for a in analysis.actions)
         summary_text = (analysis.scene_summary or "").lower()
         combined = f"{action_text} {summary_text}"
@@ -118,6 +147,14 @@ class EventService:
         return "scene_change"
 
     def _emotion_hint(self, importance: float) -> str:
+        """重要度から感情ヒントを算出する。
+
+        Args:
+            importance: イベント重要度（0.0〜1.0）。
+
+        Returns:
+            重要度帯に対応する感情ヒント。
+        """
         for threshold, hint in self._EMOTION_MAP:
             if importance >= threshold:
                 return hint

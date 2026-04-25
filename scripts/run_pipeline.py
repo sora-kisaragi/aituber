@@ -55,6 +55,14 @@ _STYLE_INSTRUCT: dict[str, str] = {
 
 
 def probe_video_meta(video_path: str) -> tuple[float, float]:
+    """動画の再生時間（秒）とFPSを返す。
+
+    Args:
+        video_path: 対象動画ファイルパス。
+
+    Returns:
+        `(duration_seconds, fps)` のタプル。
+    """
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
@@ -63,6 +71,15 @@ def probe_video_meta(video_path: str) -> tuple[float, float]:
 
 
 def run(input_path: str, title: str) -> str:
+    """DB セッションを管理しながらパイプラインを実行する。
+
+    Args:
+        input_path: 入力動画パス。
+        title: 動画タイトル。
+
+    Returns:
+        生成された出力動画パス。
+    """
     db: Session = SessionLocal()
     try:
         return _run_pipeline(db, input_path, title)
@@ -71,6 +88,16 @@ def run(input_path: str, title: str) -> str:
 
 
 def _run_pipeline(db: Session, input_path: str, title: str) -> str:
+    """エンドツーエンドで実況生成パイプラインを実行する。
+
+    Args:
+        db: DB セッション。
+        input_path: 入力動画パス。
+        title: 動画タイトル。
+
+    Returns:
+        生成された出力動画パス。
+    """
     logger.info("=== パイプライン開始: %s ===", input_path)
 
     video_id = uuid.uuid4()
@@ -513,6 +540,16 @@ def _run_pipeline(db: Session, input_path: str, title: str) -> str:
 
 
 def _merge_srt(srt_paths: list[str], video_id: str, media_root: str) -> str | None:
+    """複数SRTを結合して1つの字幕ファイルを生成する。
+
+    Args:
+        srt_paths: 結合対象 SRT ファイルパス一覧。
+        video_id: 出力先ディレクトリ名に使う動画 ID。
+        media_root: メディアルートディレクトリ。
+
+    Returns:
+        結合後 SRT パス。有効な字幕がない場合は `None`。
+    """
     valid = [p for p in srt_paths if Path(p).exists()]
     if not valid:
         return None
@@ -524,6 +561,14 @@ def _merge_srt(srt_paths: list[str], video_id: str, media_root: str) -> str | No
 
 
 def _resolve_tts_speaker(style: str) -> str:
+    """実況スタイルから利用する話者名を解決する。
+
+    Args:
+        style: 実況スタイル（`excited` / `neutral` / `calm`）。
+
+    Returns:
+        スタイルに対応する話者名。未定義時はデフォルト話者名。
+    """
     speaker_map = {
         "excited": settings.tts_speaker_excited.strip(),
         "neutral": settings.tts_speaker_neutral.strip(),
@@ -533,6 +578,14 @@ def _resolve_tts_speaker(style: str) -> str:
 
 
 def main() -> None:
+    """CLI 引数を解釈してパイプライン実行を開始する。
+
+    Args:
+        なし。
+
+    Returns:
+        なし。入力検証後に `run` を呼び出して結果を表示する。
+    """
     parser = argparse.ArgumentParser(description="AITuber パイプライン実行")
     parser.add_argument("--input", required=True, help="入力 mp4 ファイルパス")
     parser.add_argument("--title", default="", help="動画タイトル（省略時はファイル名）")

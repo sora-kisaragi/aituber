@@ -1,3 +1,5 @@
+"""システム設定の参照・更新 API を提供する。"""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -67,7 +69,14 @@ _EDITABLE_KEYS: set[str] = {
 
 @router.get("/", response_model=list[SystemSettingRead])
 def get_settings(db: Session = Depends(get_db)) -> list[SystemSettingRead]:
-    """現在の設定一覧を返す。DB 値がなければ .env のデフォルト値を返す。"""
+    """現在の設定一覧を返す。
+
+    Args:
+        db: DB セッション。
+
+    Returns:
+        UI で編集可能な設定の一覧。DB 値がない場合は `.env` の既定値を返す。
+    """
     db_map = {r.key: r.value for r in db.query(SystemSetting).all()}
     env_dict = settings.model_dump()
 
@@ -89,7 +98,15 @@ def update_settings(
     updates: list[SystemSettingUpdate],
     db: Session = Depends(get_db),
 ) -> list[SystemSettingRead]:
-    """設定を DB に保存する。未知のキーは無視する。"""
+    """設定を DB に保存する。
+
+    Args:
+        updates: 更新対象の設定キーと値。
+        db: DB セッション。
+
+    Returns:
+        更新後の設定一覧。
+    """
     for item in updates:
         if item.key not in _EDITABLE_KEYS:
             continue

@@ -1,3 +1,5 @@
+"""test_pipeline_state モジュール。"""
+
 from __future__ import annotations
 
 import json
@@ -8,6 +10,14 @@ from app.utils.pipeline_state import PipelineSegmentStateStore
 
 
 def test_sync_segments_creates_pending_entries(tmp_path: Path) -> None:
+    """test_sync_segments_creates_pending_entries の動作を検証する。
+
+    Args:
+        tmp_path: テスト専用の一時ディレクトリ。
+
+    Returns:
+        なし。state 同期結果と保存内容を検証する。
+    """
     store = PipelineSegmentStateStore(str(tmp_path), "video-1")
     segments = [
         SimpleNamespace(start_time=0.0, end_time=5.0, storage_path="/tmp/seg0.mp4"),
@@ -23,6 +33,14 @@ def test_sync_segments_creates_pending_entries(tmp_path: Path) -> None:
 
 
 def test_mark_failed_and_completed_updates_status(tmp_path: Path) -> None:
+    """test_mark_failed_and_completed_updates_status の動作を検証する。
+
+    Args:
+        tmp_path: テスト専用の一時ディレクトリ。
+
+    Returns:
+        なし。失敗→完了遷移時の保存内容を検証する。
+    """
     store = PipelineSegmentStateStore(str(tmp_path), "video-2")
     segments = [SimpleNamespace(start_time=0.0, end_time=5.0, storage_path="/tmp/seg0.mp4")]
     store.sync_segments(segments)

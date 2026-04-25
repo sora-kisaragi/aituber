@@ -1,3 +1,5 @@
+"""実況音声・字幕を FFmpeg で合成する。"""
+
 from __future__ import annotations
 
 import subprocess
@@ -22,6 +24,15 @@ class Composer:
         media_root: str = "/var/aituber/media",
         game_audio_volume: float = 0.3,
     ) -> None:
+        """Composer を初期化する。
+
+        Args:
+            media_root: 一時成果物の保存ルート。
+            game_audio_volume: 元ゲーム音声に適用する音量倍率。
+
+        Returns:
+            なし。
+        """
         self.media_root = Path(media_root)
         self.game_audio_volume = game_audio_volume
 
@@ -32,7 +43,17 @@ class Composer:
         srt_path: str | None,
         output_path: str,
     ) -> str:
-        """音声ミックスと字幕焼き込みを行い、出力パスを返す。"""
+        """音声ミックスと字幕焼き込みを行い、出力パスを返す。
+
+        Args:
+            video_path: 元動画ファイルパス。
+            audio_entries: 発話音声エントリ配列。
+            srt_path: 字幕ファイルパス（未指定時は字幕なし）。
+            output_path: 出力動画ファイルパス。
+
+        Returns:
+            最終出力動画パス。
+        """
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
         if audio_entries:
@@ -66,7 +87,15 @@ class Composer:
         entries: list[AudioEntry],
         min_gap_seconds: float = 0.0,
     ) -> list[AudioEntry]:
-        """重複しないように音声エントリ開始時刻を正規化する。"""
+        """重複しないように音声エントリ開始時刻を正規化する。
+
+        Args:
+            entries: 正規化対象の音声エントリ配列。
+            min_gap_seconds: 音声間に確保する最小ギャップ（秒）。
+
+        Returns:
+            重複解消後の音声エントリ配列。
+        """
         if not entries:
             return []
 
@@ -90,7 +119,16 @@ class Composer:
         return normalized
 
     def _mix_audio(self, video_path: str, entries: list[AudioEntry], out_wav: str) -> None:
-        """元動画音声と実況音声を amix でミックスして WAV に出力する。"""
+        """元動画音声と実況音声を amix でミックスして WAV に出力する。
+
+        Args:
+            video_path: 元動画パス（0番入力）。
+            entries: 合成対象の実況音声エントリ。
+            out_wav: ミックス済み WAV の出力先。
+
+        Returns:
+            なし。`out_wav` へミックス結果を書き込む。
+        """
         inputs = ["-i", video_path]
         filter_parts = [f"[0:a]volume={self.game_audio_volume}[orig]"]
 
@@ -123,6 +161,7 @@ class Composer:
     def _burn_subtitles(
         self, source: str, srt_path: str, output: str, *, has_separate_audio: bool, video_path: str
     ) -> None:
+        """字幕を焼き込んだ動画を書き出す。"""
         srt_escaped = srt_path.replace("\\", "/").replace(":", "\\:")
         subtitle_filter = (
             f"subtitles={srt_escaped}"
@@ -181,6 +220,7 @@ class Composer:
         has_separate_audio: bool,
         video_path: str,
     ) -> None:
+        """字幕なしで映像・音声を結合して出力する。"""
         if has_separate_audio:
             # 入力0: 元動画（映像）、入力1: ミックス済み音声 WAV
             subprocess.run(

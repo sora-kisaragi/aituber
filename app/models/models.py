@@ -1,3 +1,5 @@
+"""models モジュール。"""
+
 import uuid
 from datetime import datetime
 
@@ -9,6 +11,8 @@ from app.db.session import Base
 
 
 class SystemSetting(Base):
+    """SystemSetting を表すクラス。"""
+
     __tablename__ = "system_settings"
 
     key = Column(Text, primary_key=True)
@@ -18,6 +22,8 @@ class SystemSetting(Base):
 
 
 class Video(Base):
+    """Video を表すクラス。"""
+
     __tablename__ = "videos"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -35,6 +41,8 @@ class Video(Base):
 
 
 class Segment(Base):
+    """Segment を表すクラス。"""
+
     __tablename__ = "segments"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -52,6 +60,8 @@ class Segment(Base):
 
 
 class Frame(Base):
+    """Frame を表すクラス。"""
+
     __tablename__ = "frames"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -66,6 +76,8 @@ class Frame(Base):
 
 
 class Event(Base):
+    """Event を表すクラス。"""
+
     __tablename__ = "events"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -81,6 +93,8 @@ class Event(Base):
 
 
 class UtterancePlan(Base):
+    """UtterancePlan を表すクラス。"""
+
     __tablename__ = "utterance_plans"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -100,6 +114,8 @@ class UtterancePlan(Base):
 
 
 class Commentary(Base):
+    """Commentary を表すクラス。"""
+
     __tablename__ = "commentaries"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -117,6 +133,8 @@ class Commentary(Base):
 
 
 class Audio(Base):
+    """Audio を表すクラス。"""
+
     __tablename__ = "audios"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -133,6 +151,8 @@ class Audio(Base):
 
 
 class Subtitle(Base):
+    """Subtitle を表すクラス。"""
+
     __tablename__ = "subtitles"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

@@ -1,3 +1,5 @@
+"""test_subtitle モジュール。"""
+
 import tempfile
 from pathlib import Path
 
@@ -5,10 +7,28 @@ from app.core.subtitle import SubtitleService
 
 
 class TestSubtitleService:
+    """TestSubtitleService テストクラス。"""
+
     def setup_method(self) -> None:
+        """各テストで使う `SubtitleService` を初期化する。
+
+        Args:
+            なし。
+
+        Returns:
+            なし。各テストで使う `SubtitleService` を初期化する。
+        """
         self.service = SubtitleService()
 
     def test_generate_creates_srt_file(self) -> None:
+        """test_generate_creates_srt_file の動作を検証する。
+
+        Args:
+            なし。
+
+        Returns:
+            なし。SRT ファイル生成と終了時刻計算を検証する。
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             result = self.service.generate(
                 text="こんにちは世界！",
@@ -21,6 +41,14 @@ class TestSubtitleService:
             assert result.end_time == 3.0
 
     def test_srt_content_contains_text(self) -> None:
+        """test_srt_content_contains_text の動作を検証する。
+
+        Args:
+            なし。
+
+        Returns:
+            なし。SRT 本文にテキストと時間範囲が含まれることを検証する。
+        """
         with tempfile.TemporaryDirectory() as tmpdir:
             result = self.service.generate(
                 text="テスト実況",
@@ -34,6 +62,14 @@ class TestSubtitleService:
             assert "00:00:07,000" in result.srt_content
 
     def test_long_text_splits_lines(self) -> None:
+        """test_long_text_splits_lines の動作を検証する。
+
+        Args:
+            なし。
+
+        Returns:
+            なし。長文が複数行へ分割されることを検証する。
+        """
         long_text = "あ" * 50
         with tempfile.TemporaryDirectory() as tmpdir:
             result = self.service.generate(

@@ -1,3 +1,5 @@
+"""実況生成向けの LLM プロンプト組み立てを提供する。"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -31,6 +33,16 @@ class PromptGenerator:
         events: list[EventResult],
         prev_text: str = "",
     ) -> list[dict[str, str]]:
+        """発話計画とイベント情報から Chat Completions 用メッセージを構築する。
+
+        Args:
+            plan: 発話計画1件。
+            events: 当該計画に関連するイベント一覧。
+            prev_text: 直前の実況文（重複回避ヒント）。
+
+        Returns:
+            LLM に渡す `system` / `user` メッセージ配列。
+        """
         event_summary = "\n".join(self._format_event_line(e) for e in events)
         style_rule = _STYLE_PROMPTS.get(plan.style, _STYLE_PROMPTS["neutral"])
         user_content = (
@@ -49,6 +61,14 @@ class PromptGenerator:
         ]
 
     def _format_event_line(self, event: EventResult) -> str:
+        """イベント1件をプロンプト向けの1行テキストへ整形する。
+
+        Args:
+            event: 整形対象のイベント推定結果。
+
+        Returns:
+            プロンプト本文へ埋め込む 1 行サマリー。
+        """
         summary = event.details.get("scene_summary", "") if isinstance(event.details, dict) else ""
         return (
             f"- [{event.event_type}] {summary} "
@@ -60,6 +80,14 @@ class CommentaryService:
     """LLM を使って実況文を生成する。"""
 
     def __init__(self, prompt_generator: PromptGenerator | None = None) -> None:
+        """実況生成サービスを初期化する。
+
+        Args:
+            prompt_generator: 既存のプロンプト生成器。未指定時は標準実装を使う。
+
+        Returns:
+            なし。
+        """
         self.prompt_generator = prompt_generator or PromptGenerator()
 
     def generate(
@@ -69,7 +97,17 @@ class CommentaryService:
         llm_client: LLMClient,
         prev_text: str = "",
     ) -> dict[str, Any]:
-        """実況文を生成して返す。"""
+        """実況文を生成して返す。
+
+        Args:
+            plan: 発話計画1件。
+            events: 関連イベント一覧。
+            llm_client: LLM クライアント。
+            prev_text: 直前の実況文。
+
+        Returns:
+            実況文・言語・スタイル・生レスポンスを含む辞書。
+        """
         messages = self.prompt_generator.build_prompt(plan, events, prev_text)
         result = llm_client.complete(messages)
         return {

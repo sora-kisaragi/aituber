@@ -1,3 +1,5 @@
+"""セグメント処理状態の永続化ユーティリティ。"""
+
 from __future__ import annotations
 
 import json
@@ -12,12 +14,28 @@ class PipelineSegmentStateStore:
     """セグメント処理状態をファイルで管理する。"""
 
     def __init__(self, media_root: str, video_id: str) -> None:
+        """状態ストアを初期化する。
+
+        Args:
+            media_root: メディア保存ルート。
+            video_id: 対象動画ID。
+
+        Returns:
+            なし。必要な保存ディレクトリを作成する。
+        """
         self.video_id = video_id
         self.state_path = Path(media_root) / video_id / "debug" / "segment_status.json"
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
 
     def sync_segments(self, segments: list[Any]) -> dict[str, Any]:
-        """現在のセグメント一覧に合わせて状態を同期する。"""
+        """現在のセグメント一覧に合わせて状態を同期する。
+
+        Args:
+            segments: 現在の分割結果配列（start_time/end_time/storage_path を持つ想定）。
+
+        Returns:
+            同期後の状態辞書。
+        """
         state = self._load_state()
         current_keys: set[str] = set()
 
@@ -45,7 +63,14 @@ class PipelineSegmentStateStore:
         return state
 
     def failed_indexes(self) -> list[int]:
-        """失敗扱いのセグメント index 一覧を返す。"""
+        """失敗扱いのセグメント index 一覧を返す。
+
+        Args:
+            なし。
+
+        Returns:
+            `status=failed` のセグメントインデックス配列。
+        """
         state = self._load_state()
         indexes: list[int] = []
         for key, item in state["segments"].items():
@@ -63,7 +88,17 @@ class PipelineSegmentStateStore:
         frame_count: int,
         event_count: int,
     ) -> None:
-        """対象セグメントを完了済みとして記録する。"""
+        """対象セグメントを完了済みとして記録する。
+
+        Args:
+            index: セグメントインデックス。
+            segment_id: DB 上のセグメントID。
+            frame_count: 抽出フレーム数。
+            event_count: 生成イベント数。
+
+        Returns:
+            なし。対象インデックスの状態を `completed` へ更新する。
+        """
         self._mark(
             index=index,
             status="completed",
@@ -77,7 +112,15 @@ class PipelineSegmentStateStore:
         )
 
     def mark_failed(self, index: int, error_message: str) -> None:
-        """対象セグメントを失敗として記録する。"""
+        """対象セグメントを失敗として記録する。
+
+        Args:
+            index: セグメントインデックス。
+            error_message: 失敗理由メッセージ。
+
+        Returns:
+            なし。対象インデックスの状態を `failed` へ更新する。
+        """
         self._mark(
             index=index,
             status="failed",
@@ -94,6 +137,7 @@ class PipelineSegmentStateStore:
         last_error: str | None,
         extra: dict[str, Any],
     ) -> None:
+        """指定セグメントの状態を更新して保存する。"""
         state = self._load_state()
         key = str(index)
         current = state["segments"].get(key, {"index": index})
@@ -110,6 +154,7 @@ class PipelineSegmentStateStore:
         self._save_state(state)
 
     def _load_state(self) -> dict[str, Any]:
+        """状態ファイルを読み込む。未存在または破損時は初期状態を返す。"""
         if not self.state_path.exists():
             return {
                 "video_id": self.video_id,
@@ -128,6 +173,7 @@ class PipelineSegmentStateStore:
             }
 
     def _save_state(self, state: dict[str, Any]) -> None:
+        """状態辞書を JSON ファイルへ保存する。"""
         state["video_id"] = self.video_id
         state["updated_at"] = datetime.now(tz=UTC).isoformat()
         try:

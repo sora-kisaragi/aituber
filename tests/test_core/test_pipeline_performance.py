@@ -1,3 +1,5 @@
+"""PipelinePerformanceRecorder の記録仕様を検証する。"""
+
 from __future__ import annotations
 
 import json
@@ -9,6 +11,14 @@ from app.utils.pipeline_performance import PipelinePerformanceRecorder
 
 
 def test_measure_and_finalize_writes_performance_file(tmp_path: Path) -> None:
+    """正常系で performance.json が保存されることを確認する。
+
+    Args:
+        tmp_path: テスト専用の一時ディレクトリ。
+
+    Returns:
+        なし。正常終了時の記録内容を検証する。
+    """
     recorder = PipelinePerformanceRecorder(str(tmp_path), "video-001")
 
     with recorder.measure("segmentation", {"segment_duration": 5}):
@@ -28,11 +38,18 @@ def test_measure_and_finalize_writes_performance_file(tmp_path: Path) -> None:
 
 
 def test_measure_when_error_occurs_records_error_status(tmp_path: Path) -> None:
+    """例外発生時に error ステータスで記録されることを確認する。
+
+    Args:
+        tmp_path: テスト専用の一時ディレクトリ。
+
+    Returns:
+        なし。例外時のエラーステータス記録を検証する。
+    """
     recorder = PipelinePerformanceRecorder(str(tmp_path), "video-002")
 
-    with pytest.raises(RuntimeError, match="boom"):
-        with recorder.measure("segment_pipeline"):
-            raise RuntimeError("boom")
+    with pytest.raises(RuntimeError, match="boom"), recorder.measure("segment_pipeline"):
+        raise RuntimeError("boom")
 
     payload = json.loads((tmp_path / "video-002" / "debug" / "performance.json").read_text())
     assert payload["steps"][0]["name"] == "segment_pipeline"

@@ -1,3 +1,5 @@
+"""アプリ設定の定義と実行時オーバーライド解決を提供する。"""
+
 from __future__ import annotations
 
 import contextlib
@@ -10,6 +12,8 @@ if TYPE_CHECKING:
 
 
 class Settings(BaseSettings):
+    """アプリ全体で利用する設定値を保持する。"""
+
     database_url: str = "postgresql://localhost/aituber"
 
     tts_base_url: str = "http://localhost:7865"
@@ -47,7 +51,14 @@ settings = Settings()
 
 
 def get_runtime_settings(db: Session) -> Settings:
-    """DB の system_settings で .env 値を上書きした Settings を返す。"""
+    """DB の system_settings で .env 値を上書きした Settings を返す。
+
+    Args:
+        db: DB セッション。
+
+    Returns:
+        `.env` の設定値に DB の上書きを適用した `Settings`。
+    """
     from app.models.models import SystemSetting
 
     rows = db.query(SystemSetting).all()

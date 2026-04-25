@@ -1,3 +1,5 @@
+"""パイプライン進捗の SSE 配信 API。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -13,9 +15,25 @@ router = APIRouter()
 
 @router.get("/{video_id}/progress/stream")
 async def stream_progress(video_id: str, request: Request) -> EventSourceResponse:
-    """process / compose の進捗を SSE でストリーミングする。"""
+    """process / compose の進捗を SSE でストリーミングする。
+
+    Args:
+        video_id: 進捗監視対象動画ID。
+        request: クライアント接続状態を判定するリクエスト。
+
+    Returns:
+        1秒間隔で進捗JSONを送信する SSE レスポンス。
+    """
 
     async def event_generator():
+        """SSE 用の進捗イベントを逐次生成する。
+
+        Args:
+            なし。
+
+        Returns:
+            `EventSourceResponse` が消費する非同期ジェネレーター。
+        """
         while True:
             if await request.is_disconnected():
                 break

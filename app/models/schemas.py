@@ -1,3 +1,5 @@
+"""schemas モジュール。"""
+
 from __future__ import annotations
 
 import uuid
@@ -8,10 +10,14 @@ from pydantic import BaseModel, ConfigDict
 
 
 class VideoCreate(BaseModel):
+    """VideoCreate を表すクラス。"""
+
     title: str
 
 
 class VideoRead(BaseModel):
+    """VideoRead を表すクラス。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -24,12 +30,16 @@ class VideoRead(BaseModel):
 
 
 class VideoUpdate(BaseModel):
+    """VideoUpdate を表すクラス。"""
+
     title: str | None = None
     tags: list[str] | None = None
     tags_manual: list[str] | None = None
 
 
 class VideoTagRead(BaseModel):
+    """VideoTagRead を表すクラス。"""
+
     tags_manual: list[str]
     tags_auto_rule: list[str]
     tags_auto_llm: list[str]
@@ -40,6 +50,8 @@ class VideoTagRead(BaseModel):
 
 
 class SegmentRead(BaseModel):
+    """SegmentRead を表すクラス。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -51,6 +63,8 @@ class SegmentRead(BaseModel):
 
 
 class FrameRead(BaseModel):
+    """FrameRead を表すクラス。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -61,6 +75,8 @@ class FrameRead(BaseModel):
 
 
 class EventRead(BaseModel):
+    """EventRead を表すクラス。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -72,6 +88,8 @@ class EventRead(BaseModel):
 
 
 class UtterancePlanRead(BaseModel):
+    """UtterancePlanRead を表すクラス。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -84,6 +102,8 @@ class UtterancePlanRead(BaseModel):
 
 
 class CommentaryRead(BaseModel):
+    """CommentaryRead を表すクラス。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -94,6 +114,8 @@ class CommentaryRead(BaseModel):
 
 
 class AudioRead(BaseModel):
+    """AudioRead を表すクラス。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -106,6 +128,8 @@ class AudioRead(BaseModel):
 
 
 class SubtitleRead(BaseModel):
+    """SubtitleRead を表すクラス。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -116,6 +140,8 @@ class SubtitleRead(BaseModel):
 
 
 class TimelineItem(BaseModel):
+    """TimelineItem を表すクラス。"""
+
     start_time: float
     end_time: float
     style: str
@@ -125,11 +151,15 @@ class TimelineItem(BaseModel):
 
 
 class VideoTimeline(BaseModel):
+    """VideoTimeline を表すクラス。"""
+
     input_rel: str | None
     items: list[TimelineItem]
 
 
 class SystemSettingRead(BaseModel):
+    """SystemSettingRead を表すクラス。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     key: str
@@ -138,11 +168,15 @@ class SystemSettingRead(BaseModel):
 
 
 class SystemSettingUpdate(BaseModel):
+    """SystemSettingUpdate を表すクラス。"""
+
     key: str
     value: str
 
 
 class TTSSynthesizeRequest(BaseModel):
+    """TTSSynthesizeRequest を表すクラス。"""
+
     text: str
     mode: str = "custom_voice"
     speaker: str = "ono_anna"

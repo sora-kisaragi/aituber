@@ -1,3 +1,5 @@
+"""動画分割と代表フレーム抽出のユーティリティ。"""
+
 from __future__ import annotations
 
 import subprocess
@@ -11,6 +13,8 @@ import cv2
 
 @dataclass
 class SegmentResult:
+    """動画分割結果1件分の情報。"""
+
     start_time: float
     end_time: float
     segment_type: str = "gameplay"
@@ -19,6 +23,8 @@ class SegmentResult:
 
 @dataclass
 class FrameResult:
+    """抽出フレーム1件分の情報。"""
+
     timestamp: float
     image_path: str
     features: dict[str, Any] = field(default_factory=dict)
@@ -28,11 +34,28 @@ class SegmentationService:
     """FFmpeg で動画をセグメント単位に分割する。"""
 
     def __init__(self, segment_duration: int = 5, media_root: str = "/var/aituber/media") -> None:
+        """分割サービスを初期化する。
+
+        Args:
+            segment_duration: 1セグメントの長さ（秒）。
+            media_root: 分割動画の保存ルート。
+
+        Returns:
+            なし。
+        """
         self.segment_duration = segment_duration
         self.media_root = Path(media_root)
 
     def execute(self, video_path: str, video_id: str) -> list[SegmentResult]:
-        """動画を `segment_duration` 秒単位に分割し、結果リストを返す。"""
+        """動画を `segment_duration` 秒単位に分割し、結果リストを返す。
+
+        Args:
+            video_path: 入力動画ファイルパス。
+            video_id: 出力先ディレクトリ名に利用する動画ID。
+
+        Returns:
+            開始時刻順の分割結果配列。
+        """
         duration = self._probe_duration(video_path)
         video_dir = self.media_root / video_id / "segments"
         video_dir.mkdir(parents=True, exist_ok=True)
@@ -58,6 +81,7 @@ class SegmentationService:
         return segments
 
     def _probe_duration(self, video_path: str) -> float:
+        """ffprobe で動画再生時間を取得する。"""
         result = subprocess.run(
             [
                 "ffprobe",
@@ -76,6 +100,7 @@ class SegmentationService:
         return float(result.stdout.strip())
 
     def _cut_segment(self, video_path: str, start: float, duration: float, output: str) -> None:
+        """ffmpeg で指定区間のセグメントを切り出す。"""
         subprocess.run(
             [
                 "ffmpeg",
@@ -99,6 +124,14 @@ class FrameExtractor:
     """各セグメントの中間フレームを OpenCV で抽出する。"""
 
     def __init__(self, media_root: str = "/var/aituber/media") -> None:
+        """フレーム抽出サービスを初期化する。
+
+        Args:
+            media_root: 抽出画像の保存ルート。
+
+        Returns:
+            なし。
+        """
         self.media_root = Path(media_root)
 
     def extract(
@@ -108,7 +141,17 @@ class FrameExtractor:
         start_time: float,
         end_time: float,
     ) -> list[FrameResult]:
-        """セグメントの中間時刻のフレームを JPEG として保存し、FrameResult を返す。"""
+        """セグメントの中間時刻のフレームを JPEG として保存し、FrameResult を返す。
+
+        Args:
+            video_path: 入力動画ファイルパス。
+            segment_id: 画像保存先ディレクトリ名に利用するセグメントID。
+            start_time: セグメント開始時刻（秒）。
+            end_time: セグメント終了時刻（秒）。
+
+        Returns:
+            抽出できた場合は1件の `FrameResult` を含む配列。失敗時は空配列。
+        """
         mid_time = (start_time + end_time) / 2.0
         frame_dir = self.media_root / segment_id / "frames"
         frame_dir.mkdir(parents=True, exist_ok=True)

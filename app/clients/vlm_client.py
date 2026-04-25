@@ -1,3 +1,5 @@
+"""VLM API を呼び出してゲーム画面解析結果を取得するクライアント。"""
+
 from __future__ import annotations
 
 import base64
@@ -29,11 +31,28 @@ class VLMClient:
     _RESIZE_WIDTH = 640
 
     def __init__(self, base_url: str, api_key: str, model: str) -> None:
+        """VLM クライアントを初期化する。
+
+        Args:
+            base_url: OpenAI 互換 API のベース URL。
+            api_key: API 認証キー。
+            model: 解析に使用するモデル名。
+
+        Returns:
+            なし。API クライアントと解析用モデル名を保持する。
+        """
         self._client = OpenAI(base_url=base_url, api_key=api_key)
         self._model = model
 
     def analyze(self, image_path: str) -> VisionAnalysis:
-        """フレーム画像を VLM で解析して VisionAnalysis を返す。失敗時はダミーにフォールバック。"""
+        """フレーム画像を解析して `VisionAnalysis` を返す。
+
+        Args:
+            image_path: 解析対象画像のファイルパス。
+
+        Returns:
+            解析結果。外部APIエラー時は低信頼度のフォールバック結果を返す。
+        """
         try:
             b64 = self._encode_image(image_path)
             response = self._client.chat.completions.create(
@@ -60,7 +79,14 @@ class VLMClient:
             return VisionAnalysis(scene_summary="解析失敗", confidence=0.3)
 
     def _encode_image(self, image_path: str) -> str:
-        """画像を JPEG に変換して base64 エンコードする。長辺を _RESIZE_WIDTH に縮小する。"""
+        """画像を VLM 入力向けに JPEG/Base64 へ変換する。
+
+        Args:
+            image_path: 入力画像のファイルパス。
+
+        Returns:
+            `data:image/jpeg;base64,...` 用の Base64 文字列。
+        """
         img = cv2.imread(image_path)
         if img is None:
             raise ValueError(f"画像読み込み失敗: {image_path}")
@@ -72,7 +98,14 @@ class VLMClient:
         return base64.b64encode(buf.tobytes()).decode()
 
     def _parse(self, raw: str) -> VisionAnalysis:
-        """VLM レスポンスを VisionAnalysis にパースする。失敗時はテキストをそのまま使う。"""
+        """VLM の生レスポンス文字列を `VisionAnalysis` へ変換する。
+
+        Args:
+            raw: VLM レスポンス本文（JSON 文字列想定）。
+
+        Returns:
+            構造化された解析結果。JSON 解析に失敗した場合は本文の先頭を要約として返す。
+        """
         try:
             text = raw.strip()
             # マークダウンコードブロックを除去

@@ -1,3 +1,5 @@
+"""Qwen TTS サーバー向けクライアント実装。"""
+
 from __future__ import annotations
 
 import time
@@ -34,6 +36,18 @@ class QwenTTSClient:
         default_language: str = "auto",
         default_instruct: str = "",
     ) -> None:
+        """TTS クライアントを初期化する。
+
+        Args:
+            base_url: TTS サーバーのベース URL。
+            default_mode: 既定の合成モード。
+            default_speaker: 既定の話者名またはプロファイル名。
+            default_language: 既定の言語指定。
+            default_instruct: 既定のスタイル指示文。
+
+        Returns:
+            なし。既定モードと話者設定を内部状態へ保持する。
+        """
         self._base_url = base_url.rstrip("/")
         self.default_mode = default_mode
         self.default_speaker = default_speaker
@@ -49,9 +63,18 @@ class QwenTTSClient:
         language: str = "",
         instruct: str = "",
     ) -> float:
-        """テキストを音声合成して WAV ファイルを保存し、音声長（秒）を返す。
+        """テキストを音声合成して WAV を保存する。
 
-        最大 3 回リトライする。リクエストは multipart/form-data で送信する。
+        Args:
+            text: 合成対象テキスト。
+            output_path: 生成 WAV の保存先パス。
+            mode: 合成モード（空の場合は既定値を使用）。
+            speaker: 話者名またはプロファイル名（空の場合は既定値を使用）。
+            language: 言語指定（空の場合は既定値を使用）。
+            instruct: スタイル指示文（空の場合は既定値を使用）。
+
+        Returns:
+            生成 WAV の再生時間（秒）。
         """
         mode = (mode or self.default_mode).strip()
         speaker = (speaker or self.default_speaker).strip()
@@ -95,9 +118,17 @@ class QwenTTSClient:
         language: str,
         instruct: str = "",
     ) -> dict[str, str]:
-        """エンドポイントに応じたリクエストペイロードを組み立てる。
+        """エンドポイント仕様に合わせてリクエストボディを構築する。
 
-        voice-clone/profile のみ Form、それ以外は JSON body。
+        Args:
+            endpoint: 呼び出し先エンドポイント。
+            text: 合成対象テキスト。
+            speaker: 話者名またはプロファイル名。
+            language: 言語指定。
+            instruct: スタイル指示文。
+
+        Returns:
+            API へ送信するペイロード辞書。
         """
         if "voice-clone/profile" in endpoint:
             # Form data: instruct 非対応
@@ -112,18 +143,48 @@ class QwenTTSClient:
         return payload
 
     def list_speakers(self) -> list[str]:
-        """custom_voice で使える話者一覧を返す（GET /tts/speakers）。失敗時は空リスト。"""
+        """custom_voice で使える話者一覧を返す（GET /tts/speakers）。失敗時は空リスト。
+
+        Args:
+            なし。
+
+        Returns:
+            custom_voice モードで利用可能な話者名一覧。
+        """
         return self._fetch_list("/tts/speakers", "speakers")
 
     def list_profiles(self) -> list[str]:
-        """保存済みプロファイル一覧を返す（GET /tts/voice-clone/profiles）。失敗時は空リスト。"""
+        """保存済みプロファイル一覧を返す（GET /tts/voice-clone/profiles）。失敗時は空リスト。
+
+        Args:
+            なし。
+
+        Returns:
+            voice_clone_profile モードで利用可能なプロファイル一覧。
+        """
         return self._fetch_list("/tts/voice-clone/profiles", "profiles")
 
     def list_languages(self) -> list[str]:
-        """対応言語一覧を返す（GET /tts/languages）。失敗時は空リスト。"""
+        """対応言語一覧を返す（GET /tts/languages）。失敗時は空リスト。
+
+        Args:
+            なし。
+
+        Returns:
+            TTS サーバーが対応する言語一覧。
+        """
         return self._fetch_list("/tts/languages", "languages")
 
     def _fetch_list(self, path: str, key: str) -> list[str]:
+        """一覧取得 API を呼び出し、文字列配列へ正規化して返す。
+
+        Args:
+            path: API パス。
+            key: レスポンスが辞書形式だった場合に参照するキー。
+
+        Returns:
+            取得した文字列一覧。失敗時は空リスト。
+        """
         try:
             r = httpx.get(f"{self._base_url}{path}", timeout=5.0)
             r.raise_for_status()
@@ -137,7 +198,15 @@ class QwenTTSClient:
         return []
 
     def _append_silence(self, wav_path: str, pad_seconds: float = 0.3) -> None:
-        """WAV 末尾に無音フレームを追加する。TTS モデルの末尾クリップを補正する。"""
+        """WAV 末尾に無音フレームを追加する。TTS モデルの末尾クリップを補正する。
+
+        Args:
+            wav_path: 対象 WAV ファイルパス。
+            pad_seconds: 末尾へ追加する無音長（秒）。
+
+        Returns:
+            なし。対象 WAV ファイルを上書きして末尾無音を付与する。
+        """
         with wave.open(wav_path, "rb") as wf:
             params = wf.getparams()
             audio_frames = wf.readframes(wf.getnframes())
@@ -150,6 +219,14 @@ class QwenTTSClient:
             wf.writeframes(audio_frames + silent_bytes)
 
     def _wav_duration(self, wav_path: str) -> float:
+        """WAV ファイルの再生時間を秒で返す。
+
+        Args:
+            wav_path: 対象 WAV ファイルパス。
+
+        Returns:
+            再生時間（秒）。
+        """
         with wave.open(wav_path, "rb") as wf:
             frames = wf.getnframes()
             rate = wf.getframerate()

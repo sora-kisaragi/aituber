@@ -1,3 +1,5 @@
+"""LLM を利用して動画タグを推定・正規化する。"""
+
 from __future__ import annotations
 
 import json
@@ -31,7 +33,16 @@ class LLMTagger:
         current_tags: list[str],
         llm_client: LLMClient,
     ) -> dict[str, list[str]]:
-        """LLM から自動タグと候補タグを生成して返す。"""
+        """LLM から自動タグと候補タグを生成して返す。
+
+        Args:
+            video_title: 対象動画タイトル。
+            current_tags: 既存タグ（文脈ヒントとして利用）。
+            llm_client: タグ生成に使う LLM クライアント。
+
+        Returns:
+            `tags_auto_llm` と `tags_suggested_llm` を持つ辞書。
+        """
         messages = self._build_messages(video_title, current_tags)
         result = llm_client.complete(messages)
         payload = self._parse_json_payload(result.get("text", ""))
@@ -44,6 +55,7 @@ class LLMTagger:
         }
 
     def _build_messages(self, video_title: str, current_tags: list[str]) -> list[dict[str, str]]:
+        """タグ生成用のプロンプトメッセージを組み立てる。"""
         tags_text = ", ".join(current_tags) if current_tags else "(なし)"
         user_prompt = (
             f"動画タイトル: {video_title or '(未設定)'}\n"
@@ -56,6 +68,7 @@ class LLMTagger:
         ]
 
     def _parse_json_payload(self, raw_text: str) -> dict[str, Any]:
+        """LLM 出力文字列から JSON オブジェクトを抽出して返す。"""
         text = raw_text.strip()
         match = self._JSON_BLOCK_PATTERN.search(text)
         if match:
@@ -71,6 +84,7 @@ class LLMTagger:
         return payload
 
     def _normalize_auto_tags(self, value: Any) -> list[str]:
+        """`tags_auto_llm` 候補を taxonomy 準拠形式へ正規化する。"""
         if not isinstance(value, list):
             return []
 
@@ -90,6 +104,7 @@ class LLMTagger:
         return [tag for tag in tags if not tag.startswith("candidate:")]
 
     def _normalize_suggested_tags(self, value: Any) -> list[str]:
+        """`tags_suggested_llm` 候補を `candidate:*` 形式へ正規化する。"""
         if not isinstance(value, list):
             return []
 
@@ -112,5 +127,6 @@ class LLMTagger:
         return [tag for tag in tags if tag.startswith("candidate:")]
 
     def _sanitize(self, value: str) -> str:
+        """タグ値から許容文字以外を除去して整形する。"""
         sanitized = self._SANITIZE_PATTERN.sub("_", value.strip().lower())
         return sanitized.strip("_") or "unknown"
