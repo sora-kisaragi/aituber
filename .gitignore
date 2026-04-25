@@ -16,6 +16,7 @@ env/
 # Environment
 .env
 .env.local
+.codex/hooks/.env.local
 
 # IDE
 .vscode/

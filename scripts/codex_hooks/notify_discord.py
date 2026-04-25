@@ -73,7 +73,10 @@ def send_discord(webhook_url: str, payload: dict[str, str]) -> None:
     req = urllib.request.Request(
         webhook_url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "aituber-codex-hook/1.0",
+        },
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=10) as response:
