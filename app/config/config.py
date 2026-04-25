@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     planner_talk_window_seconds: float = 60.0
     planner_max_queue_delay_seconds: float = 3.0
     compose_overlap_min_gap_seconds: float = 0.0
+    compose_overlap_strategy: str = "clip_previous"
+    compose_clip_min_keep_seconds: float = 0.3
 
     model_config = {"env_file": ".env"}
 
