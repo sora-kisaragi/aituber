@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     tts_default_speaker: str = "ono_anna"
     tts_default_language: str = "japanese"
     tts_default_instruct: str = ""
+    tts_speaker_excited: str = ""
+    tts_speaker_neutral: str = ""
+    tts_speaker_calm: str = ""
 
     llm_api_base: str = "https://api.openai.com/v1"
     llm_api_key: str = ""

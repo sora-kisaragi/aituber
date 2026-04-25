@@ -38,6 +38,7 @@ class UtterancePlanner:
         max_talk_ratio: float = 0.5,
         talk_window_seconds: float = 60.0,
         max_queue_delay_seconds: float = 3.0,
+        event_cooldown_seconds: float = 4.0,
     ) -> None:
         self.min_silence_seconds = max(0.0, min_silence_seconds)
         self.plan_duration = max(0.1, plan_duration)
@@ -45,25 +46,29 @@ class UtterancePlanner:
         self.max_talk_ratio = max(0.0, min(1.0, max_talk_ratio))
         self.talk_window_seconds = max(1.0, talk_window_seconds)
         self.max_queue_delay_seconds = max(0.0, max_queue_delay_seconds)
+        self.event_cooldown_seconds = max(0.0, event_cooldown_seconds)
 
     def plan(self, video_id: str, events: list[EventResult]) -> list[UtterancePlanResult]:
         """speak_recommended なイベントから発話計画を生成する。"""
-        candidates = [
-            event
-            for event in events
-            if event.speak_recommended and event.importance >= self.speak_threshold
-        ]
+        candidates = [event for event in events if event.speak_recommended]
         candidates = self._deduplicate_same_timestamp(candidates)
         candidates.sort(key=lambda e: e.timestamp)
 
         plans: list[UtterancePlanResult] = []
         last_end_time = -self.min_silence_seconds
+        last_spoken_by_type: dict[str, float] = {}
 
         for event in candidates:
+            effective_threshold = self._resolve_threshold(len(plans))
+            if event.importance < effective_threshold:
+                continue
             # 重複を回避するため、開始時刻を「前発話終了 + 無言時間」以降に寄せる。
             start_time = max(event.timestamp, last_end_time + self.min_silence_seconds)
             queue_delay = start_time - event.timestamp
             if queue_delay > self.max_queue_delay_seconds:
+                continue
+
+            if self._in_event_cooldown(event.event_type, start_time, last_spoken_by_type):
                 continue
 
             end_time = start_time + self.plan_duration
@@ -82,6 +87,7 @@ class UtterancePlanner:
                 )
             )
             last_end_time = end_time
+            last_spoken_by_type[event.event_type] = start_time
 
         return plans
 
@@ -118,6 +124,25 @@ class UtterancePlanner:
             if importance >= threshold:
                 return style
         return "calm"
+
+    def _resolve_threshold(self, accepted_count: int) -> float:
+        """連続発話が増えたら閾値を段階的に上げる。"""
+        if accepted_count >= 8:
+            return min(1.0, self.speak_threshold + 0.2)
+        if accepted_count >= 4:
+            return min(1.0, self.speak_threshold + 0.1)
+        return self.speak_threshold
+
+    def _in_event_cooldown(
+        self,
+        event_type: str,
+        start_time: float,
+        last_spoken_by_type: dict[str, float],
+    ) -> bool:
+        last_time = last_spoken_by_type.get(event_type)
+        if last_time is None:
+            return False
+        return (start_time - last_time) < self.event_cooldown_seconds
 
     def _calc_priority(self, importance: float) -> int:
         return max(1, min(5, int(importance * 5)))

@@ -2,11 +2,15 @@ from app.core.event_generation import EventResult
 from app.core.planning import UtterancePlanner
 
 
-def _make_event(timestamp: float, importance: float = 0.7) -> EventResult:
+def _make_event(
+    timestamp: float,
+    importance: float = 0.7,
+    event_type: str = "scene_change",
+) -> EventResult:
     return EventResult(
         event_id="evt-1",
         timestamp=timestamp,
-        event_type="scene_change",
+        event_type=event_type,
         importance=importance,
         emotion_hint="neutral",
         speak_recommended=True,
@@ -81,3 +85,34 @@ class TestUtterancePlanner:
         ]
         plans = planner.plan("vid-1", events)
         assert len(plans) == 1
+
+    def test_same_event_type_within_cooldown_is_suppressed(self) -> None:
+        planner = UtterancePlanner(
+            min_silence_seconds=0.0,
+            plan_duration=1.0,
+            max_queue_delay_seconds=10.0,
+            event_cooldown_seconds=5.0,
+        )
+        events = [
+            _make_event(0.0, importance=0.9, event_type="combat"),
+            _make_event(2.0, importance=0.95, event_type="combat"),
+            _make_event(7.0, importance=0.95, event_type="combat"),
+        ]
+        plans = planner.plan("vid-1", events)
+        assert len(plans) == 2
+        assert plans[0].start_time == 0.0
+        assert plans[1].start_time == 7.0
+
+    def test_different_event_types_are_not_suppressed_by_cooldown(self) -> None:
+        planner = UtterancePlanner(
+            min_silence_seconds=0.0,
+            plan_duration=1.0,
+            max_queue_delay_seconds=10.0,
+            event_cooldown_seconds=10.0,
+        )
+        events = [
+            _make_event(0.0, importance=0.9, event_type="combat"),
+            _make_event(2.0, importance=0.9, event_type="score_change"),
+        ]
+        plans = planner.plan("vid-1", events)
+        assert len(plans) == 2

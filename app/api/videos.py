@@ -859,13 +859,20 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
             update_progress(video_id, "tts", pct, f"音声合成中: {plan_idx + 1}/{plan_count}")
             audio_path = str(Path(cfg.media_root) / str(commentary.id) / "audio.wav")
             instruct = _STYLE_INSTRUCT.get(commentary.style or "", "")
-            duration = tts_client.synthesize(commentary.text, audio_path, instruct=instruct)
+            speaker = _resolve_tts_speaker(commentary.style or "", cfg)
+            duration = tts_client.synthesize(
+                commentary.text,
+                audio_path,
+                speaker=speaker,
+                instruct=instruct,
+            )
             tts_debug_rows.append(
                 {
                     "index": plan_idx,
                     "plan_id": str(plan.id),
                     "commentary_id": str(commentary.id),
                     "style": commentary.style,
+                    "speaker": speaker,
                     "audio_path": audio_path,
                     "duration_seconds": duration,
                 }
@@ -873,6 +880,9 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
 
             audio = Audio(
                 commentary_id=commentary.id,
+                tts_mode=cfg.tts_default_mode,
+                speaker=speaker,
+                language=cfg.tts_default_language,
                 storage_path=audio_path,
                 duration_seconds=duration,
             )
@@ -1228,6 +1238,16 @@ def _refresh_rule_tags(video: Video, cfg: Any) -> dict[str, Any]:
     tag_status["rule"] = "ready"
     metadata["tag_status"] = tag_status
     return normalize_video_metadata(metadata)
+
+
+def _resolve_tts_speaker(style: str, cfg: Any) -> str:
+    style_key = (style or "").strip().lower()
+    speaker_map = {
+        "excited": str(getattr(cfg, "tts_speaker_excited", "") or "").strip(),
+        "neutral": str(getattr(cfg, "tts_speaker_neutral", "") or "").strip(),
+        "calm": str(getattr(cfg, "tts_speaker_calm", "") or "").strip(),
+    }
+    return speaker_map.get(style_key) or str(cfg.tts_default_speaker)
 
 
 def _to_video_tag_read(raw_metadata: dict[str, Any] | None) -> VideoTagRead:
