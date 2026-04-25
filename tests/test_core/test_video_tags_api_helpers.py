@@ -1,5 +1,8 @@
+from types import SimpleNamespace
+
 import pytest
 
+from app.api.videos import _resolve_tts_speaker
 from app.core.tags import (
     build_tag_source_map,
     mark_llm_tag_status_skipped,
@@ -98,3 +101,15 @@ def test_refresh_llm_tags_when_failure_sets_error_and_keeps_existing_tags(
     assert result["tags_suggested_llm"] == ["candidate:tekken"]
     assert result["tag_status"]["llm"] == "error"
     assert result["tag_status"]["llm_error"] == "timeout"
+
+
+def test_resolve_tts_speaker_when_style_specific_speaker_exists_returns_style_speaker() -> None:
+    cfg = SimpleNamespace(
+        tts_default_speaker="base_voice",
+        tts_speaker_excited="voice_excited",
+        tts_speaker_neutral="voice_neutral",
+        tts_speaker_calm="",
+    )
+    assert _resolve_tts_speaker("excited", cfg) == "voice_excited"
+    assert _resolve_tts_speaker("neutral", cfg) == "voice_neutral"
+    assert _resolve_tts_speaker("calm", cfg) == "base_voice"

@@ -16,3 +16,7 @@
 テスト実施後は `/test-check` スキルのテンプレートに従って `TC_<機能名>.md` を作成する。
 
 詳細: [テスト・レビュー規約](../03_standards/test_review_standard.md)
+
+## 関連ドキュメント
+
+- [パフォーマンス検証手順](./performance_validation.md)

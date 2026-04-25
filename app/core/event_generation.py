@@ -27,6 +27,12 @@ class EventService:
         (0.5, "neutral"),
         (0.0, "calm"),
     ]
+    _KILL_KEYWORDS = ("kill", "撃破", "討伐", "倒し", "elimination")
+    _DEATH_KEYWORDS = ("death", "dead", "倒され", "やられ", "被弾死")
+    _LEVEL_UP_KEYWORDS = ("level_up", "level up", "ランクアップ", "昇格", "進化")
+    _SCORE_KEYWORDS = ("score", "goal", "得点", "ポイント", "capture", "objective")
+    _COMBAT_KEYWORDS = ("attack", "combat", "fight", "battle", "攻撃", "戦闘", "交戦")
+    _CALM_KEYWORDS = ("menu", "idle", "waiting", "待機", "移動", "探索")
 
     def generate(
         self,
@@ -73,16 +79,42 @@ class EventService:
 
     def _calc_importance(self, analysis: VisionAnalysis) -> float:
         score = analysis.confidence
-        if "攻撃" in analysis.actions or "kill" in analysis.actions:
-            score = min(1.0, score + 0.2)
+        action_text = " ".join(str(a).lower() for a in analysis.actions)
+        summary_text = (analysis.scene_summary or "").lower()
+        combined = f"{action_text} {summary_text}"
+
+        if any(keyword in combined for keyword in self._KILL_KEYWORDS):
+            score += 0.25
+        elif any(keyword in combined for keyword in self._DEATH_KEYWORDS):
+            score += 0.2
+        elif any(keyword in combined for keyword in self._LEVEL_UP_KEYWORDS):
+            score += 0.18
+        elif any(keyword in combined for keyword in self._SCORE_KEYWORDS):
+            score += 0.15
+        elif any(keyword in combined for keyword in self._COMBAT_KEYWORDS):
+            score += 0.12
+
+        if any(keyword in combined for keyword in self._CALM_KEYWORDS):
+            score -= 0.1
+
+        score = max(0.0, min(1.0, score))
         return round(score, 2)
 
     def _infer_type(self, analysis: VisionAnalysis) -> str:
-        actions = [a.lower() for a in analysis.actions]
-        if any(a in actions for a in ["kill", "攻撃", "attack"]):
-            return "combat"
-        if any(a in actions for a in ["score", "goal", "得点"]):
+        action_text = " ".join(str(a).lower() for a in analysis.actions)
+        summary_text = (analysis.scene_summary or "").lower()
+        combined = f"{action_text} {summary_text}"
+
+        if any(keyword in combined for keyword in self._KILL_KEYWORDS):
+            return "kill"
+        if any(keyword in combined for keyword in self._DEATH_KEYWORDS):
+            return "death"
+        if any(keyword in combined for keyword in self._LEVEL_UP_KEYWORDS):
+            return "level_up"
+        if any(keyword in combined for keyword in self._SCORE_KEYWORDS):
             return "score_change"
+        if any(keyword in combined for keyword in self._COMBAT_KEYWORDS):
+            return "combat"
         return "scene_change"
 
     def _emotion_hint(self, importance: float) -> str:
