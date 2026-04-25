@@ -78,3 +78,33 @@ def test_normalize_tags_filters_unknown_and_duplicate_tags() -> None:
     normalized = normalize_tags(raw)
 
     assert normalized == ["genre:rpg", "game:elden_ring"]
+
+
+def test_normalize_tags_when_extended_content_prefixes_returns_valid_items() -> None:
+    """test_normalize_tags_when_extended_content_prefixes_returns_valid_items の動作を検証する。
+
+    Args:
+        なし。
+
+    Returns:
+        なし。拡張した content 系プレフィックスが受理されることを検証する。
+    """
+    raw = [
+        "scene:boss_intro",
+        "situation:clutch",
+        "place:castle",
+        "environment:outdoor",
+        "time:night",
+        "weather:rainy",
+    ]
+
+    normalized = normalize_tags(raw)
+
+    assert normalized == [
+        "scene:boss_intro",
+        "situation:clutch",
+        "place:castle",
+        "environment:outdoor",
+        "time:night",
+        "weather:rainy",
+    ]

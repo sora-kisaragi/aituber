@@ -19,6 +19,12 @@ CONTENT_TAG_PREFIXES: tuple[str, ...] = (
     "genre:",
     "game:",
     "topic:",
+    "scene:",
+    "situation:",
+    "place:",
+    "environment:",
+    "time:",
+    "weather:",
     "candidate:",
 )
 
