@@ -11,6 +11,7 @@ import argparse
 import sys
 import uuid
 from pathlib import Path
+from typing import Any
 
 # プロジェクトルートを sys.path に追加
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -40,6 +41,7 @@ from app.models.models import (
     Video,
 )
 from app.utils.logging import logger
+from app.utils.pipeline_debug import PipelineDebugRecorder
 
 
 def probe_video_meta(video_path: str) -> tuple[float, float]:
@@ -81,6 +83,20 @@ def _run_pipeline(db: Session, input_path: str, title: str) -> str:
     )
     db.add(video)
     db.commit()
+    debug_recorder = PipelineDebugRecorder(settings.media_root, str(video_id))
+    debug_recorder.save_step_io(
+        "video_registration",
+        input_data={
+            "input_path": input_path,
+            "title": title,
+        },
+        output_data={
+            "video_id": str(video_id),
+            "storage_path": str(dest_path),
+            "duration_seconds": duration,
+            "fps": fps,
+        },
+    )
     logger.info("動画登録完了: video_id=%s duration=%.1fs", video_id, duration)
 
     # ── 動画分割 ──────────────────────────────────────────────────────────────
@@ -89,6 +105,26 @@ def _run_pipeline(db: Session, input_path: str, title: str) -> str:
         media_root=settings.media_root,
     )
     seg_results = seg_service.execute(str(dest_path), str(video_id))
+    debug_recorder.save_step_io(
+        "segmentation",
+        input_data={
+            "video_path": str(dest_path),
+            "segment_duration": settings.segment_duration,
+        },
+        output_data={
+            "segment_count": len(seg_results),
+            "segments": [
+                {
+                    "index": idx,
+                    "start_time": seg.start_time,
+                    "end_time": seg.end_time,
+                    "segment_type": seg.segment_type,
+                    "storage_path": seg.storage_path,
+                }
+                for idx, seg in enumerate(seg_results)
+            ],
+        },
+    )
     logger.info("分割完了: %d セグメント", len(seg_results))
 
     # ── フレーム抽出・VLM 解析・イベント生成 ──────────────────────────────────
@@ -97,8 +133,17 @@ def _run_pipeline(db: Session, input_path: str, title: str) -> str:
     event_service = EventService()
 
     all_event_results = []
+    segment_debug_summaries: list[dict[str, Any]] = []
 
-    for seg_result in seg_results:
+    for seg_idx, seg_result in enumerate(seg_results):
+        logger.debug(
+            "segment処理開始: video_id=%s index=%d/%d range=%.2f-%.2f",
+            video_id,
+            seg_idx + 1,
+            len(seg_results),
+            seg_result.start_time,
+            seg_result.end_time,
+        )
         segment = Segment(
             video_id=video.id,
             start_time=seg_result.start_time,
@@ -108,6 +153,17 @@ def _run_pipeline(db: Session, input_path: str, title: str) -> str:
         )
         db.add(segment)
         db.flush()
+        debug_recorder.append_segment_debug(
+            segment_index=seg_idx,
+            segment_id=str(segment.id),
+            stage="segment_init",
+            input_data={
+                "start_time": seg_result.start_time,
+                "end_time": seg_result.end_time,
+                "segment_type": seg_result.segment_type,
+            },
+            output_data={"segment_storage_path": seg_result.storage_path},
+        )
 
         frame_results = frame_extractor.extract(
             str(dest_path),
@@ -115,20 +171,57 @@ def _run_pipeline(db: Session, input_path: str, title: str) -> str:
             seg_result.start_time,
             seg_result.end_time,
         )
+        frame_debug_rows = [
+            {"timestamp": fr.timestamp, "image_path": fr.image_path} for fr in frame_results
+        ]
+        debug_recorder.append_segment_debug(
+            segment_index=seg_idx,
+            segment_id=str(segment.id),
+            stage="frame_extraction",
+            input_data={
+                "video_path": str(dest_path),
+                "start_time": seg_result.start_time,
+                "end_time": seg_result.end_time,
+            },
+            output_data={
+                "frame_count": len(frame_results),
+                "frames": frame_debug_rows,
+            },
+        )
 
         analyses = []
+        analysis_debug_rows: list[dict[str, Any]] = []
         for fr in frame_results:
             analysis = vision_service.analyze_frame(fr.image_path)
+            features = vision_service.to_dict(analysis)
             frame = Frame(
                 segment_id=segment.id,
                 timestamp=fr.timestamp,
                 image_path=fr.image_path,
-                features=vision_service.to_dict(analysis),
+                features=features,
             )
             db.add(frame)
             analyses.append(analysis)
+            analysis_debug_rows.append(
+                {
+                    "timestamp": fr.timestamp,
+                    "image_path": fr.image_path,
+                    "analysis": features,
+                }
+            )
+        debug_recorder.append_segment_debug(
+            segment_index=seg_idx,
+            segment_id=str(segment.id),
+            stage="vision_analysis",
+            input_data={"frame_count": len(frame_results)},
+            output_data={
+                "analysis_count": len(analysis_debug_rows),
+                "analyses": analysis_debug_rows,
+            },
+        )
 
         event_results = event_service.generate(str(segment.id), seg_result.start_time, analyses)
+        event_debug_rows: list[dict[str, Any]] = []
         for er in event_results:
             event = Event(
                 segment_id=segment.id,
@@ -138,14 +231,82 @@ def _run_pipeline(db: Session, input_path: str, title: str) -> str:
                 details=er.details,
             )
             db.add(event)
+            event_debug_rows.append(
+                {
+                    "event_id": er.event_id,
+                    "timestamp": er.timestamp,
+                    "event_type": er.event_type,
+                    "importance": er.importance,
+                    "emotion_hint": er.emotion_hint,
+                    "speak_recommended": er.speak_recommended,
+                    "details": er.details,
+                }
+            )
+        debug_recorder.append_segment_debug(
+            segment_index=seg_idx,
+            segment_id=str(segment.id),
+            stage="event_generation",
+            input_data={
+                "analysis_count": len(analysis_debug_rows),
+                "segment_start_time": seg_result.start_time,
+            },
+            output_data={
+                "event_count": len(event_debug_rows),
+                "events": event_debug_rows,
+            },
+        )
+        segment_debug_summaries.append(
+            {
+                "segment_index": seg_idx,
+                "segment_id": str(segment.id),
+                "start_time": seg_result.start_time,
+                "end_time": seg_result.end_time,
+                "frame_count": len(frame_results),
+                "analysis_count": len(analysis_debug_rows),
+                "event_count": len(event_debug_rows),
+            }
+        )
+        logger.debug(
+            "segment処理完了: video_id=%s segment_id=%s frames=%d events=%d",
+            video_id,
+            segment.id,
+            len(frame_results),
+            len(event_debug_rows),
+        )
         all_event_results.extend(event_results)
 
     db.commit()
+    debug_recorder.save_step_io(
+        "segment_pipeline",
+        input_data={"segment_count": len(seg_results)},
+        output_data={
+            "total_event_count": len(all_event_results),
+            "segments": segment_debug_summaries,
+        },
+    )
     logger.info("イベント生成完了: %d 件", len(all_event_results))
 
     # ── 発話計画 ──────────────────────────────────────────────────────────────
     planner = UtterancePlanner()
     plan_results = planner.plan(str(video.id), all_event_results)
+    debug_recorder.save_step_io(
+        "planning",
+        input_data={"event_count": len(all_event_results)},
+        output_data={
+            "plan_count": len(plan_results),
+            "plans": [
+                {
+                    "plan_id": pr.plan_id,
+                    "event_ids": pr.event_ids,
+                    "start_time": pr.start_time,
+                    "end_time": pr.end_time,
+                    "priority": pr.priority,
+                    "style": pr.style,
+                }
+                for pr in plan_results
+            ],
+        },
+    )
     logger.info("発話計画: %d 件", len(plan_results))
 
     # ── LLM 実況生成 ──────────────────────────────────────────────────────────
@@ -156,8 +317,9 @@ def _run_pipeline(db: Session, input_path: str, title: str) -> str:
     )
     commentary_service = CommentaryService()
     prev_text = ""
+    commentary_debug_rows: list[dict[str, Any]] = []
 
-    for pr in plan_results:
+    for plan_idx, pr in enumerate(plan_results):
         plan = UtterancePlan(
             video_id=video.id,
             event_ids=pr.event_ids,
@@ -179,10 +341,28 @@ def _run_pipeline(db: Session, input_path: str, title: str) -> str:
             llm_raw_response=com_data["llm_raw_response"],
         )
         db.add(commentary)
+        commentary_debug_rows.append(
+            {
+                "index": plan_idx,
+                "plan_id": str(plan.id),
+                "event_ids": pr.event_ids,
+                "style": com_data["style"],
+                "text": com_data["text"],
+                "language": com_data["language"],
+            }
+        )
         prev_text = com_data["text"]
         logger.info("実況生成: [%s] %s", pr.style, com_data["text"][:40])
 
     db.commit()
+    debug_recorder.save_step_io(
+        "commentary_generation",
+        input_data={"plan_count": len(plan_results)},
+        output_data={
+            "commentary_count": len(commentary_debug_rows),
+            "commentaries": commentary_debug_rows,
+        },
+    )
 
     # ── TTS 音声生成 + 字幕生成 ──────────────────────────────────────────────
     tts_client = QwenTTSClient(
@@ -248,6 +428,15 @@ def _run_pipeline(db: Session, input_path: str, title: str) -> str:
         srt_paths.append(srt_result.file_path)
 
     db.commit()
+    debug_recorder.save_step_io(
+        "tts_and_subtitle",
+        input_data={"plan_count": len(plans_in_db)},
+        output_data={
+            "audio_count": len(audio_entries),
+            "subtitle_count": len(srt_paths),
+            "srt_paths": srt_paths,
+        },
+    )
     logger.info("音声・字幕生成完了: %d 件", len(audio_entries))
 
     # ── 動画合成 ──────────────────────────────────────────────────────────────
@@ -255,6 +444,15 @@ def _run_pipeline(db: Session, input_path: str, title: str) -> str:
     output_path = str(media_dir / "output.mp4")
     composer = Composer(media_root=settings.media_root)
     composer.compose(str(dest_path), audio_entries, merged_srt, output_path)
+    debug_recorder.save_step_io(
+        "compose",
+        input_data={
+            "input_video": str(dest_path),
+            "audio_count": len(audio_entries),
+            "merged_srt": merged_srt,
+        },
+        output_data={"output_path": output_path},
+    )
 
     logger.info("=== パイプライン完了: %s ===", output_path)
     return output_path

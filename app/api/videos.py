@@ -46,6 +46,7 @@ from app.models.models import (
 )
 from app.models.schemas import TimelineItem, VideoRead, VideoTagRead, VideoTimeline, VideoUpdate
 from app.utils.logging import logger
+from app.utils.pipeline_debug import PipelineDebugRecorder
 
 router = APIRouter()
 
@@ -326,11 +327,13 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(status_code=404, detail="動画が見つかりません")
 
     cfg = get_runtime_settings(db)
+    debug_recorder = PipelineDebugRecorder(cfg.media_root, str(video.id))
     llm_client = LLMClient(
         base_url=cfg.llm_api_base,
         api_key=cfg.llm_api_key,
         model=cfg.llm_model_name,
     )
+    original_metadata = video.video_metadata
     metadata = _refresh_rule_tags(video, cfg)
     metadata = refresh_llm_tags(
         video_id=str(video.id),
@@ -341,6 +344,15 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
     video.video_metadata = metadata
     db.add(video)
     db.commit()
+    debug_recorder.save_step_io(
+        "tag_refresh",
+        input_data={
+            "video_id": str(video.id),
+            "title": video.title,
+            "video_metadata": original_metadata,
+        },
+        output_data={"video_metadata": metadata},
+    )
 
     seg_service = SegmentationService(
         segment_duration=cfg.segment_duration,
@@ -374,12 +386,42 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
         logger.error("process エラー: %s", e)
         raise HTTPException(status_code=500, detail=str(e)) from e
     logger.info("分割完了: %d セグメント", len(seg_results))
+    debug_recorder.save_step_io(
+        "segmentation",
+        input_data={
+            "video_id": str(video.id),
+            "storage_path": video.storage_path,
+            "segment_duration": cfg.segment_duration,
+        },
+        output_data={
+            "segment_count": len(seg_results),
+            "segments": [
+                {
+                    "index": idx,
+                    "start_time": seg.start_time,
+                    "end_time": seg.end_time,
+                    "segment_type": seg.segment_type,
+                    "storage_path": seg.storage_path,
+                }
+                for idx, seg in enumerate(seg_results)
+            ],
+        },
+    )
     update_progress(video_id, "segmentation", 10, f"分割完了: {len(seg_results)} セグメント")
 
     all_events = []
+    segment_debug_summaries: list[dict[str, Any]] = []
     seg_count = len(seg_results)
 
     for seg_idx, seg_result in enumerate(seg_results):
+        logger.debug(
+            "segment処理開始: video_id=%s index=%d/%d range=%.2f-%.2f",
+            video_id,
+            seg_idx + 1,
+            seg_count,
+            seg_result.start_time,
+            seg_result.end_time,
+        )
         segment = Segment(
             video_id=video.id,
             start_time=seg_result.start_time,
@@ -389,6 +431,17 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
         )
         db.add(segment)
         db.flush()
+        debug_recorder.append_segment_debug(
+            segment_index=seg_idx,
+            segment_id=str(segment.id),
+            stage="segment_init",
+            input_data={
+                "start_time": seg_result.start_time,
+                "end_time": seg_result.end_time,
+                "segment_type": seg_result.segment_type,
+            },
+            output_data={"segment_storage_path": seg_result.storage_path},
+        )
 
         frame_results = frame_extractor.extract(
             video.storage_path,
@@ -396,23 +449,60 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
             seg_result.start_time,
             seg_result.end_time,
         )
+        frame_debug_rows = [
+            {"timestamp": fr.timestamp, "image_path": fr.image_path} for fr in frame_results
+        ]
+        debug_recorder.append_segment_debug(
+            segment_index=seg_idx,
+            segment_id=str(segment.id),
+            stage="frame_extraction",
+            input_data={
+                "video_path": video.storage_path,
+                "start_time": seg_result.start_time,
+                "end_time": seg_result.end_time,
+            },
+            output_data={
+                "frame_count": len(frame_results),
+                "frames": frame_debug_rows,
+            },
+        )
 
         analyses = []
+        analysis_debug_rows: list[dict[str, Any]] = []
         for fr in frame_results:
             analysis = vision_service.analyze_frame(fr.image_path, vlm_client)
+            features = vision_service.to_dict(analysis)
             frame = Frame(
                 segment_id=segment.id,
                 timestamp=fr.timestamp,
                 image_path=fr.image_path,
-                features=vision_service.to_dict(analysis),
+                features=features,
             )
             db.add(frame)
             analyses.append(analysis)
+            analysis_debug_rows.append(
+                {
+                    "timestamp": fr.timestamp,
+                    "image_path": fr.image_path,
+                    "analysis": features,
+                }
+            )
+        debug_recorder.append_segment_debug(
+            segment_index=seg_idx,
+            segment_id=str(segment.id),
+            stage="vision_analysis",
+            input_data={"frame_count": len(frame_results)},
+            output_data={
+                "analysis_count": len(analysis_debug_rows),
+                "analyses": analysis_debug_rows,
+            },
+        )
 
         pct = 10 + int((seg_idx + 1) / seg_count * 60)
         update_progress(video_id, "vision", pct, f"フレーム解析中: {seg_idx + 1}/{seg_count}")
 
         event_results = event_service.generate(str(segment.id), seg_result.start_time, analyses)
+        event_debug_rows: list[dict[str, Any]] = []
         for er in event_results:
             event = Event(
                 segment_id=segment.id,
@@ -423,14 +513,83 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
             )
             db.add(event)
             all_events.append(er)
+            event_debug_rows.append(
+                {
+                    "event_id": er.event_id,
+                    "timestamp": er.timestamp,
+                    "event_type": er.event_type,
+                    "importance": er.importance,
+                    "emotion_hint": er.emotion_hint,
+                    "speak_recommended": er.speak_recommended,
+                    "details": er.details,
+                }
+            )
+        debug_recorder.append_segment_debug(
+            segment_index=seg_idx,
+            segment_id=str(segment.id),
+            stage="event_generation",
+            input_data={
+                "analysis_count": len(analysis_debug_rows),
+                "segment_start_time": seg_result.start_time,
+            },
+            output_data={
+                "event_count": len(event_debug_rows),
+                "events": event_debug_rows,
+            },
+        )
+        segment_debug_summaries.append(
+            {
+                "segment_index": seg_idx,
+                "segment_id": str(segment.id),
+                "start_time": seg_result.start_time,
+                "end_time": seg_result.end_time,
+                "frame_count": len(frame_results),
+                "analysis_count": len(analysis_debug_rows),
+                "event_count": len(event_debug_rows),
+            }
+        )
+        logger.debug(
+            "segment処理完了: video_id=%s segment_id=%s frames=%d events=%d",
+            video_id,
+            segment.id,
+            len(frame_results),
+            len(event_debug_rows),
+        )
 
     db.commit()
+    debug_recorder.save_step_io(
+        "segment_pipeline",
+        input_data={"segment_count": seg_count},
+        output_data={
+            "total_event_count": len(all_events),
+            "segments": segment_debug_summaries,
+        },
+    )
     update_progress(video_id, "planning", 75, "発話計画を生成中...")
 
     plan_results = planner.plan(str(video.id), all_events)
+    debug_recorder.save_step_io(
+        "planning",
+        input_data={"event_count": len(all_events)},
+        output_data={
+            "plan_count": len(plan_results),
+            "plans": [
+                {
+                    "plan_id": pr.plan_id,
+                    "event_ids": pr.event_ids,
+                    "start_time": pr.start_time,
+                    "end_time": pr.end_time,
+                    "priority": pr.priority,
+                    "style": pr.style,
+                }
+                for pr in plan_results
+            ],
+        },
+    )
     update_progress(video_id, "planning", 80, f"発話計画完了: {len(plan_results)} 件")
     prev_text = ""
     plan_count = len(plan_results)
+    commentary_debug_rows: list[dict[str, Any]] = []
     for plan_idx, pr in enumerate(plan_results):
         plan = UtterancePlan(
             video_id=video.id,
@@ -453,13 +612,37 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
             llm_raw_response=com_data["llm_raw_response"],
         )
         db.add(commentary)
+        commentary_debug_rows.append(
+            {
+                "index": plan_idx,
+                "plan_id": str(plan.id),
+                "event_ids": pr.event_ids,
+                "style": com_data["style"],
+                "text": com_data["text"],
+                "language": com_data["language"],
+            }
+        )
         pct = 80 + int((plan_idx + 1) / plan_count * 15)
         update_progress(video_id, "commentary", pct, f"実況生成中: {plan_idx + 1}/{plan_count}")
         prev_text = com_data["text"]
 
     db.commit()
+    debug_recorder.save_step_io(
+        "commentary_generation",
+        input_data={"plan_count": plan_count},
+        output_data={
+            "commentary_count": len(commentary_debug_rows),
+            "commentaries": commentary_debug_rows,
+        },
+    )
     update_progress(video_id, "done", 100, "処理完了")
-    return {"status": "ok", "video_id": video_id, "plans": len(plan_results)}
+    result = {"status": "ok", "video_id": video_id, "plans": len(plan_results)}
+    debug_recorder.save_step_io(
+        "process_result",
+        input_data={"video_id": video_id},
+        output_data=result,
+    )
+    return result
 
 
 @router.post("/{video_id}/compose")
@@ -470,6 +653,7 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
         raise HTTPException(status_code=404, detail="動画が見つかりません")
 
     cfg = get_runtime_settings(db)
+    debug_recorder = PipelineDebugRecorder(cfg.media_root, str(video.id))
 
     tts_client = QwenTTSClient(
         base_url=cfg.tts_base_url,
@@ -491,6 +675,9 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
     pending_entries: list[tuple[UtterancePlan, Commentary, AudioEntry]] = []
     audio_entries: list[AudioEntry] = []
     srt_paths: list[str] = []
+    tts_debug_rows: list[dict[str, Any]] = []
+    subtitle_debug_rows: list[dict[str, Any]] = []
+    schedule_debug_rows: list[dict[str, Any]] = []
     plan_count = len(plans)
     update_progress(video_id, "compose", 0, "音声合成を開始...")
 
@@ -507,6 +694,16 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
             audio_path = str(Path(cfg.media_root) / str(commentary.id) / "audio.wav")
             instruct = _STYLE_INSTRUCT.get(commentary.style or "", "")
             duration = tts_client.synthesize(commentary.text, audio_path, instruct=instruct)
+            tts_debug_rows.append(
+                {
+                    "index": plan_idx,
+                    "plan_id": str(plan.id),
+                    "commentary_id": str(commentary.id),
+                    "style": commentary.style,
+                    "audio_path": audio_path,
+                    "duration_seconds": duration,
+                }
+            )
 
             audio = Audio(
                 commentary_id=commentary.id,
@@ -534,6 +731,15 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
 
         for index, (plan, commentary, _) in enumerate(pending_entries):
             normalized = normalized_entries[index]
+            schedule_debug_rows.append(
+                {
+                    "index": index,
+                    "plan_id": str(plan.id),
+                    "old_start_time": plan.start_time,
+                    "new_start_time": normalized.start_time,
+                    "duration_seconds": normalized.duration_seconds,
+                }
+            )
             if abs(normalized.start_time - plan.start_time) > 1e-6:
                 logger.info(
                     "発話開始時刻を調整: plan_id=%s old=%.3f new=%.3f",
@@ -559,6 +765,15 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
                 end_time=srt_result.end_time,
             )
             db.add(subtitle)
+            subtitle_debug_rows.append(
+                {
+                    "index": index,
+                    "commentary_id": str(commentary.id),
+                    "file_path": srt_result.file_path,
+                    "start_time": srt_result.start_time,
+                    "end_time": srt_result.end_time,
+                }
+            )
             audio_entries.append(
                 AudioEntry(
                     audio_path=normalized.audio_path,
@@ -569,6 +784,21 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
             srt_paths.append(srt_result.file_path)
 
         db.commit()
+        debug_recorder.save_step_io(
+            "tts_and_subtitle",
+            input_data={
+                "plan_count": plan_count,
+                "overlap_min_gap_seconds": cfg.compose_overlap_min_gap_seconds,
+            },
+            output_data={
+                "tts_count": len(tts_debug_rows),
+                "subtitle_count": len(subtitle_debug_rows),
+                "schedule_count": len(schedule_debug_rows),
+                "tts_items": tts_debug_rows,
+                "schedule_items": schedule_debug_rows,
+                "subtitle_items": subtitle_debug_rows,
+            },
+        )
 
         update_progress(video_id, "compose", 85, "字幕・動画を合成準備中...")
         update_progress(video_id, "compose", 88, "字幕ファイルを結合中...")
@@ -576,6 +806,16 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
         update_progress(video_id, "compose", 92, "映像・音声を合成中（FFmpeg）...")
         output_path = str(Path(cfg.media_root) / str(video_id) / "output.mp4")
         composer.compose(video.storage_path, audio_entries, merged_srt, output_path)
+        debug_recorder.save_step_io(
+            "compose",
+            input_data={
+                "video_id": video_id,
+                "input_video": video.storage_path,
+                "audio_count": len(audio_entries),
+                "merged_srt": merged_srt,
+            },
+            output_data={"output_path": output_path},
+        )
         update_progress(video_id, "compose", 98, "最終処理中...")
 
     except subprocess.CalledProcessError as e:

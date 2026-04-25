@@ -15,11 +15,14 @@ FastAPI + PostgreSQL + Qwen TTS + LLM API で構成する Python バックエン
 ## セットアップ
 
 ```bash
+# 仮想環境作成
+python3 -m venv .venv
+
 # 依存関係インストール
-pip install -e ".[dev]"
+.venv/bin/python -m pip install -e ".[dev]"
 
 # pre-commit フック設定
-pre-commit install
+.venv/bin/pre-commit install
 
 # 環境変数設定
 cp .env.example .env
@@ -29,10 +32,10 @@ cp .env.example .env
 docker compose -f docker/docker-compose.yml up -d db redis
 
 # マイグレーション
-alembic upgrade head
+.venv/bin/alembic upgrade head
 
 # サーバー起動
-uvicorn app.main:app --reload
+.venv/bin/uvicorn app.main:app --reload
 ```
 
 ---
@@ -41,21 +44,21 @@ uvicorn app.main:app --reload
 
 ```bash
 # テスト実行
-pytest tests/ -v
+.venv/bin/pytest tests/ -v
 
 # Lint / フォーマット
-ruff check .
-ruff format .
+.venv/bin/ruff check .
+.venv/bin/ruff format .
 
 # pre-commit 全実行
-pre-commit run --all-files
+.venv/bin/pre-commit run --all-files
 
 # マイグレーション生成
-alembic revision --autogenerate -m "説明"
-alembic upgrade head
+.venv/bin/alembic revision --autogenerate -m "説明"
+.venv/bin/alembic upgrade head
 
 # パイプライン一括実行（開発用）
-python scripts/run_pipeline.py --input sample_data/videos/sample_match.mp4
+.venv/bin/python scripts/run_pipeline.py --input sample_data/videos/sample_match.mp4
 ```
 
 ---
@@ -141,7 +144,7 @@ mp4 入力
 - 外部依存（DB・外部 API）は `pytest-mock` でモック化
 - 正常系・異常系の両方を必ずカバーする
 - テスト名: `test_<対象>_<条件>_<期待結果>`
-- PR 前に `pre-commit run --all-files` と `pytest` を実行する
+- PR 前に `.venv/bin/pre-commit run --all-files` と `.venv/bin/pytest` を実行する
 
 ---
 

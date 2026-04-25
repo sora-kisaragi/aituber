@@ -1,4 +1,4 @@
 interface:
   display_name: "Test Check"
   short_description: "実装完了判定チェックリストを実行"
-  default_prompt: "指定された機能について実装完了チェックリストを実行し、pytest 実行結果・正常系・異常系の確認状況を報告する。未確認項目があれば具体的なテストケースを提案する。実行後は感想・使い勝手・改善提案を確認し、更新する場合は /update-skill test-check を案内する。"
+  default_prompt: "指定された機能について実装完了チェックリストを実行し、.venv/bin/pytest 実行結果・正常系・異常系の確認状況を報告する。未確認項目があれば具体的なテストケースを提案する。実行後は感想・使い勝手・改善提案を確認し、更新する場合は /update-skill test-check を案内する。"

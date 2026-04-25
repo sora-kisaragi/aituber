@@ -45,7 +45,7 @@ description: 現在のブランチの変更をコミット → push → PR 作�
    ```bash
    git status
    git diff --stat
-   pre-commit run --all-files
+   .venv/bin/pre-commit run --all-files
    ```
    - すでに対象コミットを作成済みで作業ツリーが clean の場合は、手順2をスキップして手順3へ進む
 

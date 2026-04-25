@@ -19,9 +19,9 @@ description: 実装完了判定チェックリストを実行し、テスト記�
 
 以下をすべて満たすまで「完了」としない。
 
-- [ ] `pytest` が通過する
-- [ ] `ruff check` エラーなし
-- [ ] `ruff format --check` で差分なし
+- [ ] `.venv/bin/pytest` が通過する
+- [ ] `.venv/bin/ruff check` エラーなし
+- [ ] `.venv/bin/ruff format --check` で差分なし
 - [ ] 正常系が確認されている
 - [ ] 異常系が確認されている
 - [ ] ログで問題を切り分け可能である
