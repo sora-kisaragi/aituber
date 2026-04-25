@@ -38,6 +38,8 @@ _DESCRIPTIONS: dict[str, str] = {
     "planner_talk_window_seconds": "発話率計算に使う時間窓（秒）",
     "planner_max_queue_delay_seconds": "イベント発生から遅延許容する最大秒数（秒）",
     "compose_overlap_min_gap_seconds": "合成時に発話同士へ追加する最小間隔（秒）",
+    "compose_overlap_strategy": "重複時の解消戦略（shift / clip_previous）",
+    "compose_clip_min_keep_seconds": "clip_previous 時に残す最小発話長（秒未満は破棄）",
 }
 
 # Web UI から変更を許可するキー（database_url・media_root 等はサーバー管理）
@@ -64,6 +66,8 @@ _EDITABLE_KEYS: set[str] = {
     "planner_talk_window_seconds",
     "planner_max_queue_delay_seconds",
     "compose_overlap_min_gap_seconds",
+    "compose_overlap_strategy",
+    "compose_clip_min_keep_seconds",
 }
 
 

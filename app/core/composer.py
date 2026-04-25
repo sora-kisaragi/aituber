@@ -86,12 +86,16 @@ class Composer:
         self,
         entries: list[AudioEntry],
         min_gap_seconds: float = 0.0,
+        overlap_strategy: str = "shift",
+        min_keep_duration_seconds: float = 0.3,
     ) -> list[AudioEntry]:
         """重複しないように音声エントリ開始時刻を正規化する。
 
         Args:
             entries: 正規化対象の音声エントリ配列。
             min_gap_seconds: 音声間に確保する最小ギャップ（秒）。
+            overlap_strategy: 重複時の解消戦略（`shift` / `clip_previous`）。
+            min_keep_duration_seconds: `clip_previous` 時に保持する最小発話長（秒）。
 
         Returns:
             重複解消後の音声エントリ配列。
@@ -101,13 +105,35 @@ class Composer:
 
         sorted_entries = sorted(entries, key=lambda e: e.start_time)
         gap = max(0.0, min_gap_seconds)
-        next_available = 0.0
-        normalized: list[AudioEntry] = []
+        min_keep = max(0.0, min_keep_duration_seconds)
 
+        if overlap_strategy == "clip_previous":
+            normalized_clip: list[AudioEntry] = []
+            for entry in sorted_entries:
+                current = AudioEntry(
+                    audio_path=entry.audio_path,
+                    start_time=max(0.0, entry.start_time),
+                    duration_seconds=max(0.0, entry.duration_seconds),
+                )
+                if normalized_clip:
+                    prev = normalized_clip[-1]
+                    prev_end = prev.start_time + prev.duration_seconds
+                    overlap_limit = current.start_time - gap
+                    if prev_end > overlap_limit:
+                        allowed_duration = max(0.0, overlap_limit - prev.start_time)
+                        # 次発話を優先しつつ、短すぎる切れ端は自然さを損なうため破棄する。
+                        prev.duration_seconds = (
+                            allowed_duration if allowed_duration >= min_keep else 0.0
+                        )
+                normalized_clip.append(current)
+            return normalized_clip
+
+        next_available = 0.0
+        normalized_shift: list[AudioEntry] = []
         for entry in sorted_entries:
             start_time = max(entry.start_time, next_available)
             duration = max(0.0, entry.duration_seconds)
-            normalized.append(
+            normalized_shift.append(
                 AudioEntry(
                     audio_path=entry.audio_path,
                     start_time=start_time,
@@ -115,8 +141,7 @@ class Composer:
                 )
             )
             next_available = start_time + duration + gap
-
-        return normalized
+        return normalized_shift
 
     def _mix_audio(self, video_path: str, entries: list[AudioEntry], out_wav: str) -> None:
         """元動画音声と実況音声を amix でミックスして WAV に出力する。
@@ -134,9 +159,11 @@ class Composer:
 
         for i, entry in enumerate(entries, start=1):
             inputs += ["-i", entry.audio_path]
+            trimmed_duration = max(0.0, entry.duration_seconds)
             # 音声の開始位置をオフセットで指定
             filter_parts.append(
-                f"[{i}:a]adelay={int(entry.start_time * 1000)}|{int(entry.start_time * 1000)}[d{i}]"
+                f"[{i}:a]atrim=0:{trimmed_duration:.3f},asetpts=PTS-STARTPTS,"
+                f"adelay={int(entry.start_time * 1000)}|{int(entry.start_time * 1000)}[d{i}]"
             )
 
         mix_inputs = "[orig]" + "".join(f"[d{i}]" for i in range(1, len(entries) + 1))

@@ -1047,6 +1047,8 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
         normalized_entries = composer.schedule_entries(
             [entry for _, _, entry in pending_entries],
             min_gap_seconds=cfg.compose_overlap_min_gap_seconds,
+            overlap_strategy=cfg.compose_overlap_strategy,
+            min_keep_duration_seconds=cfg.compose_clip_min_keep_seconds,
         )
 
         for index, (plan, commentary, _) in enumerate(pending_entries):
@@ -1109,6 +1111,8 @@ def compose_video(video_id: str, db: Session = Depends(get_db)) -> dict:
             input_data={
                 "plan_count": plan_count,
                 "overlap_min_gap_seconds": cfg.compose_overlap_min_gap_seconds,
+                "overlap_strategy": cfg.compose_overlap_strategy,
+                "clip_min_keep_seconds": cfg.compose_clip_min_keep_seconds,
             },
             output_data={
                 "tts_count": len(tts_debug_rows),
