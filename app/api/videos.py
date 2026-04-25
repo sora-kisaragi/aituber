@@ -19,7 +19,7 @@ from app.clients.qwen_tts_client import QwenTTSClient
 from app.clients.vlm_client import VLMClient
 from app.config.config import get_runtime_settings, settings
 from app.core.composer import AudioEntry, Composer
-from app.core.event_generation import EventService
+from app.core.event_generation import EventResult, EventService
 from app.core.exo_generator import ExoConfig, ExoEntry, ExoGenerator
 from app.core.planning import UtterancePlanner
 from app.core.progress_store import update_progress
@@ -47,6 +47,7 @@ from app.models.models import (
 from app.models.schemas import TimelineItem, VideoRead, VideoTagRead, VideoTimeline, VideoUpdate
 from app.utils.logging import logger
 from app.utils.pipeline_debug import PipelineDebugRecorder
+from app.utils.pipeline_state import PipelineSegmentStateStore
 
 router = APIRouter()
 
@@ -320,7 +321,11 @@ def get_timeline(video_id: str, db: Session = Depends(get_db)) -> VideoTimeline:
 
 
 @router.post("/{video_id}/process")
-def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
+def process_video(
+    video_id: str,
+    rerun_failed_only: bool = Query(default=False),
+    db: Session = Depends(get_db),
+) -> dict:
     """動画を分割 → フレーム抽出 → イベント検出 → 発話計画 → 実況生成まで実行する。"""
     video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
@@ -328,6 +333,7 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
 
     cfg = get_runtime_settings(db)
     debug_recorder = PipelineDebugRecorder(cfg.media_root, str(video.id))
+    state_store = PipelineSegmentStateStore(cfg.media_root, str(video.id))
     llm_client = LLMClient(
         base_url=cfg.llm_api_base,
         api_key=cfg.llm_api_key,
@@ -385,13 +391,24 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
     except Exception as e:
         logger.error("process エラー: %s", e)
         raise HTTPException(status_code=500, detail=str(e)) from e
-    logger.info("分割完了: %d セグメント", len(seg_results))
+
+    state_store.sync_segments(seg_results)
+    failed_target_indexes = set(state_store.failed_indexes()) if rerun_failed_only else set()
+
+    logger.info(
+        "分割完了: %d セグメント rerun_failed_only=%s targets=%s",
+        len(seg_results),
+        rerun_failed_only,
+        sorted(failed_target_indexes),
+    )
     debug_recorder.save_step_io(
         "segmentation",
         input_data={
             "video_id": str(video.id),
             "storage_path": video.storage_path,
             "segment_duration": cfg.segment_duration,
+            "rerun_failed_only": rerun_failed_only,
+            "failed_target_indexes": sorted(failed_target_indexes),
         },
         output_data={
             "segment_count": len(seg_results),
@@ -409,8 +426,28 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
     )
     update_progress(video_id, "segmentation", 10, f"分割完了: {len(seg_results)} セグメント")
 
-    all_events = []
+    if not rerun_failed_only:
+        removed_segments = (
+            db.query(Segment).filter(Segment.video_id == video.id).delete(synchronize_session=False)
+        )
+        removed_plans = (
+            db.query(UtterancePlan)
+            .filter(UtterancePlan.video_id == video.id)
+            .delete(synchronize_session=False)
+        )
+        db.commit()
+        logger.info(
+            "既存処理結果を初期化: video_id=%s removed_segments=%d removed_plans=%d",
+            video_id,
+            removed_segments,
+            removed_plans,
+        )
+
+    all_events: list[EventResult] = []
     segment_debug_summaries: list[dict[str, Any]] = []
+    failed_segment_indexes: list[int] = []
+    processed_segment_indexes: list[int] = []
+    reused_segment_indexes: list[int] = []
     seg_count = len(seg_results)
 
     for seg_idx, seg_result in enumerate(seg_results):
@@ -422,145 +459,265 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
             seg_result.start_time,
             seg_result.end_time,
         )
-        segment = Segment(
+        existing_segment = _find_segment_by_time(
+            db,
             video_id=video.id,
             start_time=seg_result.start_time,
             end_time=seg_result.end_time,
-            segment_type=seg_result.segment_type,
-            storage_path=seg_result.storage_path,
         )
-        db.add(segment)
-        db.flush()
-        debug_recorder.append_segment_debug(
-            segment_index=seg_idx,
-            segment_id=str(segment.id),
-            stage="segment_init",
-            input_data={
-                "start_time": seg_result.start_time,
-                "end_time": seg_result.end_time,
-                "segment_type": seg_result.segment_type,
-            },
-            output_data={"segment_storage_path": seg_result.storage_path},
-        )
+        should_reprocess = (not rerun_failed_only) or (seg_idx in failed_target_indexes)
 
-        frame_results = frame_extractor.extract(
-            video.storage_path,
-            str(segment.id),
-            seg_result.start_time,
-            seg_result.end_time,
-        )
-        frame_debug_rows = [
-            {"timestamp": fr.timestamp, "image_path": fr.image_path} for fr in frame_results
-        ]
-        debug_recorder.append_segment_debug(
-            segment_index=seg_idx,
-            segment_id=str(segment.id),
-            stage="frame_extraction",
-            input_data={
-                "video_path": video.storage_path,
-                "start_time": seg_result.start_time,
-                "end_time": seg_result.end_time,
-            },
-            output_data={
-                "frame_count": len(frame_results),
-                "frames": frame_debug_rows,
-            },
-        )
-
-        analyses = []
-        analysis_debug_rows: list[dict[str, Any]] = []
-        for fr in frame_results:
-            analysis = vision_service.analyze_frame(fr.image_path, vlm_client)
-            features = vision_service.to_dict(analysis)
-            frame = Frame(
-                segment_id=segment.id,
-                timestamp=fr.timestamp,
-                image_path=fr.image_path,
-                features=features,
+        if rerun_failed_only and not should_reprocess and existing_segment is not None:
+            existing_event_results = _events_to_results(
+                existing_segment.events,
+                speak_threshold=planner.speak_threshold,
             )
-            db.add(frame)
-            analyses.append(analysis)
-            analysis_debug_rows.append(
+            all_events.extend(existing_event_results)
+            reused_segment_indexes.append(seg_idx)
+            state_store.mark_completed(
+                seg_idx,
+                segment_id=str(existing_segment.id),
+                frame_count=len(existing_segment.frames),
+                event_count=len(existing_segment.events),
+            )
+            debug_recorder.append_segment_debug(
+                segment_index=seg_idx,
+                segment_id=str(existing_segment.id),
+                stage="reuse_existing",
+                input_data={
+                    "start_time": seg_result.start_time,
+                    "end_time": seg_result.end_time,
+                },
+                output_data={
+                    "frame_count": len(existing_segment.frames),
+                    "event_count": len(existing_segment.events),
+                },
+            )
+            segment_debug_summaries.append(
                 {
-                    "timestamp": fr.timestamp,
-                    "image_path": fr.image_path,
-                    "analysis": features,
+                    "segment_index": seg_idx,
+                    "segment_id": str(existing_segment.id),
+                    "start_time": seg_result.start_time,
+                    "end_time": seg_result.end_time,
+                    "frame_count": len(existing_segment.frames),
+                    "analysis_count": len(existing_segment.frames),
+                    "event_count": len(existing_segment.events),
+                    "reused": True,
                 }
             )
-        debug_recorder.append_segment_debug(
-            segment_index=seg_idx,
-            segment_id=str(segment.id),
-            stage="vision_analysis",
-            input_data={"frame_count": len(frame_results)},
-            output_data={
-                "analysis_count": len(analysis_debug_rows),
-                "analyses": analysis_debug_rows,
-            },
-        )
+            continue
 
-        pct = 10 + int((seg_idx + 1) / seg_count * 60)
-        update_progress(video_id, "vision", pct, f"フレーム解析中: {seg_idx + 1}/{seg_count}")
-
-        event_results = event_service.generate(str(segment.id), seg_result.start_time, analyses)
-        event_debug_rows: list[dict[str, Any]] = []
-        for er in event_results:
-            event = Event(
-                segment_id=segment.id,
-                timestamp=er.timestamp,
-                event_type=er.event_type,
-                importance=er.importance,
-                details=er.details,
+        if rerun_failed_only and not should_reprocess and existing_segment is None:
+            logger.info(
+                "再利用対象セグメントの既存データがないため再処理へ切替: video_id=%s index=%d",
+                video_id,
+                seg_idx,
             )
-            db.add(event)
-            all_events.append(er)
-            event_debug_rows.append(
+
+        try:
+            with db.begin_nested():
+                if existing_segment is not None:
+                    db.delete(existing_segment)
+                    db.flush()
+
+                segment = Segment(
+                    video_id=video.id,
+                    start_time=seg_result.start_time,
+                    end_time=seg_result.end_time,
+                    segment_type=seg_result.segment_type,
+                    storage_path=seg_result.storage_path,
+                )
+                db.add(segment)
+                db.flush()
+                debug_recorder.append_segment_debug(
+                    segment_index=seg_idx,
+                    segment_id=str(segment.id),
+                    stage="segment_init",
+                    input_data={
+                        "start_time": seg_result.start_time,
+                        "end_time": seg_result.end_time,
+                        "segment_type": seg_result.segment_type,
+                    },
+                    output_data={"segment_storage_path": seg_result.storage_path},
+                )
+
+                frame_results = frame_extractor.extract(
+                    video.storage_path,
+                    str(segment.id),
+                    seg_result.start_time,
+                    seg_result.end_time,
+                )
+                frame_debug_rows = [
+                    {"timestamp": fr.timestamp, "image_path": fr.image_path} for fr in frame_results
+                ]
+                debug_recorder.append_segment_debug(
+                    segment_index=seg_idx,
+                    segment_id=str(segment.id),
+                    stage="frame_extraction",
+                    input_data={
+                        "video_path": video.storage_path,
+                        "start_time": seg_result.start_time,
+                        "end_time": seg_result.end_time,
+                    },
+                    output_data={
+                        "frame_count": len(frame_results),
+                        "frames": frame_debug_rows,
+                    },
+                )
+
+                analyses = []
+                analysis_debug_rows: list[dict[str, Any]] = []
+                for fr in frame_results:
+                    analysis = vision_service.analyze_frame(fr.image_path, vlm_client)
+                    features = vision_service.to_dict(analysis)
+                    frame = Frame(
+                        segment_id=segment.id,
+                        timestamp=fr.timestamp,
+                        image_path=fr.image_path,
+                        features=features,
+                    )
+                    db.add(frame)
+                    analyses.append(analysis)
+                    analysis_debug_rows.append(
+                        {
+                            "timestamp": fr.timestamp,
+                            "image_path": fr.image_path,
+                            "analysis": features,
+                        }
+                    )
+                debug_recorder.append_segment_debug(
+                    segment_index=seg_idx,
+                    segment_id=str(segment.id),
+                    stage="vision_analysis",
+                    input_data={"frame_count": len(frame_results)},
+                    output_data={
+                        "analysis_count": len(analysis_debug_rows),
+                        "analyses": analysis_debug_rows,
+                    },
+                )
+
+                pct = 10 + int((seg_idx + 1) / seg_count * 60)
+                update_progress(
+                    video_id, "vision", pct, f"フレーム解析中: {seg_idx + 1}/{seg_count}"
+                )
+
+                event_results = event_service.generate(
+                    str(segment.id), seg_result.start_time, analyses
+                )
+                event_debug_rows: list[dict[str, Any]] = []
+                for er in event_results:
+                    event = Event(
+                        segment_id=segment.id,
+                        timestamp=er.timestamp,
+                        event_type=er.event_type,
+                        importance=er.importance,
+                        details=er.details,
+                    )
+                    db.add(event)
+                    event_debug_rows.append(
+                        {
+                            "event_id": er.event_id,
+                            "timestamp": er.timestamp,
+                            "event_type": er.event_type,
+                            "importance": er.importance,
+                            "emotion_hint": er.emotion_hint,
+                            "speak_recommended": er.speak_recommended,
+                            "details": er.details,
+                        }
+                    )
+                debug_recorder.append_segment_debug(
+                    segment_index=seg_idx,
+                    segment_id=str(segment.id),
+                    stage="event_generation",
+                    input_data={
+                        "analysis_count": len(analysis_debug_rows),
+                        "segment_start_time": seg_result.start_time,
+                    },
+                    output_data={
+                        "event_count": len(event_debug_rows),
+                        "events": event_debug_rows,
+                    },
+                )
+
+            all_events.extend(event_results)
+            processed_segment_indexes.append(seg_idx)
+            state_store.mark_completed(
+                seg_idx,
+                segment_id=str(segment.id),
+                frame_count=len(frame_results),
+                event_count=len(event_results),
+            )
+            segment_debug_summaries.append(
                 {
-                    "event_id": er.event_id,
-                    "timestamp": er.timestamp,
-                    "event_type": er.event_type,
-                    "importance": er.importance,
-                    "emotion_hint": er.emotion_hint,
-                    "speak_recommended": er.speak_recommended,
-                    "details": er.details,
+                    "segment_index": seg_idx,
+                    "segment_id": str(segment.id),
+                    "start_time": seg_result.start_time,
+                    "end_time": seg_result.end_time,
+                    "frame_count": len(frame_results),
+                    "analysis_count": len(analysis_debug_rows),
+                    "event_count": len(event_results),
+                    "reused": False,
                 }
             )
-        debug_recorder.append_segment_debug(
-            segment_index=seg_idx,
-            segment_id=str(segment.id),
-            stage="event_generation",
-            input_data={
-                "analysis_count": len(analysis_debug_rows),
-                "segment_start_time": seg_result.start_time,
-            },
-            output_data={
-                "event_count": len(event_debug_rows),
-                "events": event_debug_rows,
-            },
-        )
-        segment_debug_summaries.append(
-            {
-                "segment_index": seg_idx,
-                "segment_id": str(segment.id),
-                "start_time": seg_result.start_time,
-                "end_time": seg_result.end_time,
-                "frame_count": len(frame_results),
-                "analysis_count": len(analysis_debug_rows),
-                "event_count": len(event_debug_rows),
-            }
-        )
-        logger.debug(
-            "segment処理完了: video_id=%s segment_id=%s frames=%d events=%d",
-            video_id,
-            segment.id,
-            len(frame_results),
-            len(event_debug_rows),
-        )
+            logger.debug(
+                "segment処理完了: video_id=%s segment_id=%s frames=%d events=%d",
+                video_id,
+                segment.id,
+                len(frame_results),
+                len(event_results),
+            )
+        except Exception as e:
+            logger.error(
+                "segment処理失敗: video_id=%s index=%d error=%s",
+                video_id,
+                seg_idx,
+                e,
+            )
+            state_store.mark_failed(seg_idx, str(e))
+            failed_segment_indexes.append(seg_idx)
+            debug_recorder.append_segment_debug(
+                segment_index=seg_idx,
+                segment_id=str(existing_segment.id) if existing_segment is not None else "",
+                stage="segment_failed",
+                input_data={
+                    "start_time": seg_result.start_time,
+                    "end_time": seg_result.end_time,
+                },
+                output_data={"error": str(e)},
+            )
 
     db.commit()
+
+    # 発話計画と実況は最新イベントから必ず再生成する。
+    removed_plans_for_rebuild = (
+        db.query(UtterancePlan)
+        .filter(UtterancePlan.video_id == video.id)
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    logger.info(
+        "発話計画再生成のため既存 plan を削除: video_id=%s removed_plans=%d",
+        video_id,
+        removed_plans_for_rebuild,
+    )
+
+    if failed_segment_indexes:
+        logger.warning(
+            "segment処理で失敗を検知: video_id=%s failed_indexes=%s",
+            video_id,
+            sorted(failed_segment_indexes),
+        )
+
     debug_recorder.save_step_io(
         "segment_pipeline",
-        input_data={"segment_count": seg_count},
+        input_data={
+            "segment_count": seg_count,
+            "rerun_failed_only": rerun_failed_only,
+        },
         output_data={
+            "processed_indexes": sorted(processed_segment_indexes),
+            "reused_indexes": sorted(reused_segment_indexes),
+            "failed_indexes": sorted(failed_segment_indexes),
             "total_event_count": len(all_events),
             "segments": segment_debug_summaries,
         },
@@ -622,8 +779,9 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
                 "language": com_data["language"],
             }
         )
-        pct = 80 + int((plan_idx + 1) / plan_count * 15)
-        update_progress(video_id, "commentary", pct, f"実況生成中: {plan_idx + 1}/{plan_count}")
+        if plan_count > 0:
+            pct = 80 + int((plan_idx + 1) / plan_count * 15)
+            update_progress(video_id, "commentary", pct, f"実況生成中: {plan_idx + 1}/{plan_count}")
         prev_text = com_data["text"]
 
     db.commit()
@@ -636,7 +794,15 @@ def process_video(video_id: str, db: Session = Depends(get_db)) -> dict:
         },
     )
     update_progress(video_id, "done", 100, "処理完了")
-    result = {"status": "ok", "video_id": video_id, "plans": len(plan_results)}
+    result = {
+        "status": "ok",
+        "video_id": video_id,
+        "plans": len(plan_results),
+        "rerun_failed_only": rerun_failed_only,
+        "processed_segments": sorted(processed_segment_indexes),
+        "reused_segments": sorted(reused_segment_indexes),
+        "failed_segments": sorted(failed_segment_indexes),
+    }
     debug_recorder.save_step_io(
         "process_result",
         input_data={"video_id": video_id},
@@ -933,6 +1099,51 @@ def export_video(video_id: str, db: Session = Depends(get_db)) -> StreamingRespo
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+def _find_segment_by_time(
+    db: Session,
+    video_id: Any,
+    start_time: float,
+    end_time: float,
+    tolerance: float = 1e-6,
+) -> Segment | None:
+    """開始/終了時刻で既存セグメントを検索する。"""
+    segments = db.query(Segment).filter(Segment.video_id == video_id).all()
+    for segment in segments:
+        if (
+            abs(segment.start_time - start_time) <= tolerance
+            and abs(segment.end_time - end_time) <= tolerance
+        ):
+            return segment
+    return None
+
+
+def _events_to_results(events: list[Event], speak_threshold: float) -> list[EventResult]:
+    """DB Event を UtterancePlanner 用 EventResult に変換する。"""
+    results: list[EventResult] = []
+    for event in events:
+        importance = event.importance or 0.0
+        results.append(
+            EventResult(
+                event_id=str(event.id),
+                timestamp=event.timestamp,
+                event_type=event.event_type,
+                importance=importance,
+                emotion_hint=_resolve_emotion_hint(importance),
+                speak_recommended=importance >= speak_threshold,
+                details=event.details or {},
+            )
+        )
+    return results
+
+
+def _resolve_emotion_hint(importance: float) -> str:
+    if importance >= 0.8:
+        return "excited"
+    if importance >= 0.5:
+        return "neutral"
+    return "calm"
 
 
 def _probe_video_meta(video_path: str) -> tuple[float, float]:
