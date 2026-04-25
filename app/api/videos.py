@@ -1167,12 +1167,22 @@ def _merge_srt(srt_paths: list[str], video_id: str, media_root: str) -> str | No
 
 
 def _normalize_tags(tags: list[str]) -> list[str]:
+    """手動タグ配列を重複除去し、必要に応じて `topic:` を補完する。
+
+    Args:
+        tags: ユーザー入力タグ配列。
+
+    Returns:
+        空要素と重複を除去したタグ配列。プレフィックス未指定は `topic:` を付与する。
+    """
     normalized: list[str] = []
     seen: set[str] = set()
     for raw in tags:
         tag = raw.strip()
         if not tag:
             continue
+        if ":" not in tag:
+            tag = f"topic:{tag}"
         key = tag.lower()
         if key in seen:
             continue
