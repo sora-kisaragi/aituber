@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { MEDIA_BASE } from '../api/client'
 import {
   deleteVideo,
@@ -16,10 +16,12 @@ interface Props {
 }
 
 export default function VideoList({ videos, onChanged }: Props) {
+  const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const [tagFilter, setTagFilter] = useState<string>('all')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
   const [tagInput, setTagInput] = useState('')
   const [tagging, setTagging] = useState(false)
   const [refreshingTagKey, setRefreshingTagKey] = useState<string | null>(null)
@@ -50,10 +52,23 @@ export default function VideoList({ videos, onChanged }: Props) {
     return []
   }
 
+  const ruleTags = (video: Video): string[] =>
+    Array.isArray(video.video_metadata?.tags_auto_rule)
+      ? video.video_metadata.tags_auto_rule
+      : []
+
+  const llmTags = (video: Video): string[] =>
+    Array.isArray(video.video_metadata?.tags_auto_llm)
+      ? video.video_metadata.tags_auto_llm
+      : []
+
   const suggestedTags = (video: Video): string[] =>
     Array.isArray(video.video_metadata?.tags_suggested_llm)
       ? video.video_metadata.tags_suggested_llm
       : []
+
+  const isSystemTag = (tag: string): boolean =>
+    tag.startsWith('cfg:') || tag.startsWith('video:')
 
   const allTags = Array.from(
     new Set(videos.flatMap((v) => effectiveTags(v))),
@@ -76,8 +91,15 @@ export default function VideoList({ videos, onChanged }: Props) {
   const parseTags = (raw: string): string[] =>
     raw
       .split(',')
-      .map((t) => t.trim())
+      .map((t) => normalizeManualTagInput(t))
       .filter((t) => t.length > 0)
+
+  const normalizeManualTagInput = (raw: string): string => {
+    const tag = raw.trim()
+    if (!tag) return ''
+    if (tag.includes(':')) return tag
+    return `topic:${tag}`
+  }
 
   const mergeTags = (current: string[], incoming: string[]): string[] => {
     const merged: string[] = []
@@ -141,6 +163,33 @@ export default function VideoList({ videos, onChanged }: Props) {
       window.alert(`削除に失敗しました: ${msg}`)
     } finally {
       setDeletingId(null)
+    }
+  }
+
+  const handleDeleteSelected = async () => {
+    const targetIds = Array.from(selectedIds)
+    if (targetIds.length === 0) {
+      window.alert('削除する動画を選択してください。')
+      return
+    }
+    if (
+      !window.confirm(
+        `選択中の${targetIds.length}件を削除しますか？\n関連データも削除されます。`,
+      )
+    ) {
+      return
+    }
+
+    setBulkDeleting(true)
+    try {
+      await Promise.all(targetIds.map(async (id) => deleteVideo(id)))
+      setSelectedIds(new Set())
+      onChanged()
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      window.alert(`一括削除に失敗しました: ${msg}`)
+    } finally {
+      setBulkDeleting(false)
     }
   }
 
@@ -283,7 +332,7 @@ export default function VideoList({ videos, onChanged }: Props) {
       <div className="flex flex-col md:flex-row gap-2 md:items-center">
         <input
           type="text"
-          placeholder="タグ付け（カンマ区切り）"
+          placeholder="タグ付け（例: boss戦, topic:boss戦）"
           value={tagInput}
           onChange={(e) => setTagInput(e.target.value)}
           className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400"
@@ -291,163 +340,259 @@ export default function VideoList({ videos, onChanged }: Props) {
         <button
           type="button"
           onClick={handleApplyTag}
-          disabled={tagging}
+          disabled={tagging || bulkDeleting}
           className="px-3 py-2 border border-blue-200 text-blue-700 rounded-lg text-sm hover:bg-blue-50 disabled:opacity-50"
         >
           {tagging ? 'タグ更新中...' : `選択中(${selectedIds.size})へタグ付け`}
+        </button>
+        <button
+          type="button"
+          onClick={handleDeleteSelected}
+          disabled={bulkDeleting || selectedIds.size === 0}
+          className="px-3 py-2 border border-red-200 text-red-700 rounded-lg text-sm hover:bg-red-50 disabled:opacity-50"
+        >
+          {bulkDeleting ? '削除中...' : `選択中(${selectedIds.size})を削除`}
         </button>
       </div>
 
       {filtered.length === 0 ? (
         <p className="text-gray-400 text-center py-8">動画がありません</p>
       ) : (
-        <ul className="space-y-2">
+        <ul className="space-y-3">
           {filtered.map((v) => (
             <li
               key={v.id}
-              className="flex items-center gap-3 p-3 bg-white rounded-lg border border-gray-200 hover:border-yellow-400 transition-colors"
+              className="p-5 bg-white rounded-lg border border-gray-200 hover:border-yellow-400 transition-colors min-h-[280px]"
             >
-              <input
-                type="checkbox"
-                checked={selectedIds.has(v.id)}
-                onChange={() => toggleSelect(v.id)}
-                className="w-4 h-4"
-                aria-label={`${v.title} を選択`}
-              />
-              <Link
-                to={`/videos/${v.id}`}
-                className="flex items-center gap-3 flex-1 min-w-0"
-              >
-                {thumbnailErrorMap[v.id] ? (
-                  <div className="w-24 h-14 bg-gray-200 rounded shrink-0" />
-                ) : (
-                  <img
-                    src={`${MEDIA_BASE}/${v.id}/thumbnail.jpg`}
-                    alt={`${v.title} のサムネイル`}
-                    className="w-24 h-14 object-cover rounded bg-gray-200 shrink-0"
-                    onError={() =>
-                      setThumbnailErrorMap((prev) => ({ ...prev, [v.id]: true }))
-                    }
-                  />
-                )}
-                <div>
-                  <div className="font-medium text-gray-800">{v.title}</div>
-                  <div className="text-xs text-gray-400 mt-0.5">
-                    {v.duration_seconds != null
-                      ? `${Math.round(v.duration_seconds)}秒`
-                      : '不明'}
-                    {v.created_at &&
-                      ` · ${new Date(v.created_at).toLocaleString('ja-JP')}`}
-                  </div>
-                  {effectiveTags(v).length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {effectiveTags(v).map((tag) => (
-                        <span
-                          key={`${v.id}-effective-${tag}`}
-                          className="px-2 py-0.5 text-[10px] rounded-full bg-gray-100 text-gray-700"
-                        >
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {suggestedTags(v).length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {suggestedTags(v).map((tag) => (
-                        <span
-                          key={`${v.id}-suggested-${tag}`}
-                          className="px-2 py-0.5 text-[10px] rounded-full bg-amber-100 text-amber-700"
-                        >
-                          候補: {tag}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {typeof v.video_metadata?.tag_status === 'object' &&
-                    typeof v.video_metadata?.tag_status?.llm_error === 'string' &&
-                    v.video_metadata.tag_status.llm_error && (
-                      <div className="text-[10px] text-amber-700 mt-1">
-                        {v.video_metadata.tag_status.llm_error}
-                      </div>
-                    )}
-                </div>
-              </Link>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => handleRefresh(v.id, 'all')}
-                  disabled={refreshingTagKey === `${v.id}:all`}
-                  className="px-2 py-1 text-xs rounded border border-blue-200 text-blue-700 hover:bg-blue-50 disabled:opacity-50"
-                >
-                  {refreshingTagKey === `${v.id}:all` ? '再生成中...' : 'タグ再生成'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleRefresh(v.id, 'rule')}
-                  disabled={refreshingTagKey === `${v.id}:rule`}
-                  className="px-2 py-1 text-xs rounded border border-sky-200 text-sky-700 hover:bg-sky-50 disabled:opacity-50"
-                >
-                  Rule
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleRefresh(v.id, 'llm')}
-                  disabled={refreshingTagKey === `${v.id}:llm`}
-                  className="px-2 py-1 text-xs rounded border border-violet-200 text-violet-700 hover:bg-violet-50 disabled:opacity-50"
-                >
-                  LLM
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleAcceptSuggested(v)}
-                  disabled={tagging || suggestedTags(v).length === 0}
-                  className="px-2 py-1 text-xs rounded border border-amber-200 text-amber-700 hover:bg-amber-50 disabled:opacity-50"
-                >
-                  候補採用
-                </button>
-              </div>
-              {renamingId === v.id ? (
-                <div className="flex items-center gap-1">
+              <div className="flex flex-col gap-3">
+                <div className="flex items-start gap-3">
                   <input
-                    type="text"
-                    value={renameInput}
-                    onChange={(e) => setRenameInput(e.target.value)}
-                    className="px-2 py-1 border border-gray-300 rounded text-xs w-40"
+                    type="checkbox"
+                    checked={selectedIds.has(v.id)}
+                    onChange={() => toggleSelect(v.id)}
+                    className="w-4 h-4 mt-1"
+                    aria-label={`${v.title} を選択`}
                   />
                   <button
                     type="button"
-                    onClick={() => handleRename(v.id)}
-                    disabled={renaming}
-                    className="px-2 py-1 text-xs rounded border border-green-200 text-green-700 hover:bg-green-50 disabled:opacity-50"
+                    onClick={() => navigate(`/videos/${v.id}`)}
+                    className="flex items-start gap-3 flex-1 min-w-0 text-left rounded-md hover:bg-gray-50 p-1"
                   >
-                    保存
-                  </button>
-                  <button
-                    type="button"
-                    onClick={cancelRename}
-                    className="px-2 py-1 text-xs rounded border border-gray-200 text-gray-600 hover:bg-gray-50"
-                  >
-                    取消
+                    {thumbnailErrorMap[v.id] ? (
+                      <div className="w-28 h-16 bg-gray-200 rounded shrink-0" />
+                    ) : (
+                      <img
+                        src={`${MEDIA_BASE}/${v.id}/thumbnail.jpg`}
+                        alt={`${v.title} のサムネイル`}
+                        className="w-28 h-16 object-cover rounded bg-gray-200 shrink-0"
+                        onError={() =>
+                          setThumbnailErrorMap((prev) => ({ ...prev, [v.id]: true }))
+                        }
+                      />
+                    )}
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-semibold text-gray-800 break-all">{v.title}</h3>
+                        <span className="text-[11px] text-gray-400">クリックで詳細へ</span>
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {v.duration_seconds != null ? `${Math.round(v.duration_seconds)}秒` : '不明'}
+                        {v.created_at && ` · ${new Date(v.created_at).toLocaleString('ja-JP')}`}
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
+                        <div className="rounded-md border border-blue-100 bg-blue-50/40 p-2">
+                          <p className="text-[10px] font-semibold text-blue-800 mb-1">手動</p>
+                          <div className="flex flex-wrap gap-1">
+                            {manualTags(v).length > 0 ? (
+                              manualTags(v).map((tag) => (
+                                <span
+                                  key={`${v.id}-manual-${tag}`}
+                                  className="px-2 py-0.5 text-[10px] rounded-full bg-blue-100 text-blue-800 border border-blue-200"
+                                >
+                                  {tag}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-[10px] text-gray-400">なし</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="rounded-md border border-sky-100 bg-sky-50/40 p-2">
+                          <p className="text-[10px] font-semibold text-sky-800 mb-1">Rule</p>
+                          <div className="flex flex-wrap gap-1">
+                            {ruleTags(v).length > 0 ? (
+                              ruleTags(v).map((tag) => (
+                                <span
+                                  key={`${v.id}-rule-${tag}`}
+                                  className="px-2 py-0.5 text-[10px] rounded-full bg-sky-100 text-sky-800 border border-sky-200"
+                                >
+                                  {tag}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-[10px] text-gray-400">なし</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="rounded-md border border-violet-100 bg-violet-50/40 p-2">
+                          <p className="text-[10px] font-semibold text-violet-800 mb-1">LLM</p>
+                          <div className="flex flex-wrap gap-1">
+                            {llmTags(v).length > 0 ? (
+                              llmTags(v).map((tag) => (
+                                <span
+                                  key={`${v.id}-llm-${tag}`}
+                                  className="px-2 py-0.5 text-[10px] rounded-full bg-violet-100 text-violet-800 border border-violet-200"
+                                >
+                                  {tag}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-[10px] text-gray-400">なし</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="rounded-md border border-amber-100 bg-amber-50/40 p-2">
+                          <p className="text-[10px] font-semibold text-amber-800 mb-1">候補</p>
+                          <div className="flex flex-wrap gap-1">
+                            {suggestedTags(v).length > 0 ? (
+                              suggestedTags(v).map((tag) => (
+                                <span
+                                  key={`${v.id}-suggested-${tag}`}
+                                  className="px-2 py-0.5 text-[10px] rounded-full bg-amber-100 text-amber-700 border border-amber-200"
+                                >
+                                  {tag}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-[10px] text-gray-400">なし</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {effectiveTags(v).length > 0 && (
+                        <div className="rounded-md border border-gray-200 bg-gray-50 p-2">
+                          <p className="text-[10px] font-semibold text-gray-700 mb-1">有効タグ（最終）</p>
+                          <div className="flex flex-wrap gap-1">
+                            {effectiveTags(v)
+                              .filter((tag) => !isSystemTag(tag))
+                              .map((tag) => (
+                                <span
+                                  key={`${v.id}-effective-content-${tag}`}
+                                  className="px-2 py-0.5 text-[10px] rounded-full bg-blue-50 text-blue-700 border border-blue-100"
+                                >
+                                  {tag}
+                                </span>
+                              ))}
+                            {effectiveTags(v)
+                              .filter((tag) => isSystemTag(tag))
+                              .map((tag) => (
+                                <span
+                                  key={`${v.id}-effective-system-${tag}`}
+                                  className="px-2 py-0.5 text-[10px] rounded-full bg-gray-100 text-gray-700 border border-gray-200"
+                                >
+                                  SYS: {tag}
+                                </span>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {typeof v.video_metadata?.tag_status === 'object' &&
+                        typeof v.video_metadata?.tag_status?.llm_error === 'string' &&
+                        v.video_metadata.tag_status.llm_error && (
+                          <div className="text-[10px] text-amber-700 mt-1">
+                            {v.video_metadata.tag_status.llm_error}
+                          </div>
+                        )}
+                    </div>
                   </button>
                 </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => startRename(v)}
-                  className="px-3 py-1.5 text-xs rounded border border-gray-200 text-gray-700 hover:bg-gray-50"
-                >
-                  名前変更
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => handleDelete(v)}
-                disabled={deletingId === v.id}
-                className="px-3 py-1.5 text-xs rounded border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50"
-              >
-                {deletingId === v.id ? '削除中...' : '削除'}
-              </button>
-              <span className="text-gray-400 text-sm">→</span>
+
+                <div className="border-t border-gray-100 pt-3 flex flex-col gap-2">
+                  <div className="text-[11px] text-gray-500">操作</div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {renamingId === v.id ? (
+                      <>
+                        <input
+                          type="text"
+                          value={renameInput}
+                          onChange={(e) => setRenameInput(e.target.value)}
+                          className="px-2 py-1 border border-gray-300 rounded text-xs w-full md:w-64"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleRename(v.id)}
+                          disabled={renaming}
+                          className="px-3 py-1.5 text-xs rounded border border-green-200 text-green-700 hover:bg-green-50 disabled:opacity-50"
+                        >
+                          {renaming ? '保存中...' : '名前を保存'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={cancelRename}
+                          disabled={renaming}
+                          className="px-3 py-1.5 text-xs rounded border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                        >
+                          キャンセル
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => startRename(v)}
+                        className="px-3 py-1.5 text-xs rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                      >
+                        名前を変更
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleRefresh(v.id, 'all')}
+                      disabled={refreshingTagKey === `${v.id}:all`}
+                      className="px-3 py-1.5 text-xs rounded border border-blue-200 text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+                    >
+                      {refreshingTagKey === `${v.id}:all` ? '再生成中...' : 'タグ再生成（全体）'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRefresh(v.id, 'rule')}
+                      disabled={refreshingTagKey === `${v.id}:rule`}
+                      className="px-3 py-1.5 text-xs rounded border border-sky-200 text-sky-700 hover:bg-sky-50 disabled:opacity-50"
+                    >
+                      Rule再生成
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRefresh(v.id, 'llm')}
+                      disabled={refreshingTagKey === `${v.id}:llm`}
+                      className="px-3 py-1.5 text-xs rounded border border-violet-200 text-violet-700 hover:bg-violet-50 disabled:opacity-50"
+                    >
+                      LLM再生成
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleAcceptSuggested(v)}
+                      disabled={tagging || suggestedTags(v).length === 0}
+                      className="px-3 py-1.5 text-xs rounded border border-amber-200 text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+                    >
+                      候補タグを採用
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(v)}
+                      disabled={deletingId === v.id || bulkDeleting}
+                      className="px-3 py-1.5 text-xs rounded border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50"
+                    >
+                      {deletingId === v.id ? '削除中...' : 'この動画を削除'}
+                    </button>
+                  </div>
+                </div>
+              </div>
             </li>
           ))}
         </ul>
